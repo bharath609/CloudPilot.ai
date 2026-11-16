@@ -250,6 +250,17 @@ totals against a hand-read CSV fixture, malformed encodings, NUL bytes, oversize
 uploads, duplicate headers, missing columns, row limits, duplicate detection,
 account masking, strict mode, pagination and transaction integrity.
 
+### Container path verified
+
+On the same machine, `docker compose build` completed and
+`docker compose up -d --wait` reported both `db` and `api` as healthy. Uploading
+the samples against `http://127.0.0.1:8000` (PostgreSQL 16) returned the same
+results as the SQLite run: billing `valid` 480/480, utilization `valid` 2,880/2,880,
+malformed billing `partial` 2 accepted / 8 rejected, amounts serialized as
+strings, and `alembic_version = 0001`. In PostgreSQL, `cost_records.amount` is
+stored as `bigint`, so `SUM(amount)` is exact integer addition. `docker compose
+config --quiet` also passes.
+
 ## 5-minute demo
 
 1. Start the API and open <http://127.0.0.1:8000/docs>.
@@ -347,10 +358,9 @@ Full STRIDE-style analysis: [`docs/THREAT_MODEL.md`](docs/THREAT_MODEL.md).
 - Utilization metrics reference billing resources by string ID; there is no
   resource inventory table yet.
 - SQLite is fine for one local user; PostgreSQL is recommended for concurrency.
-- The Docker Compose file passes `docker compose config`, but the image build
-  was **not executed** on this machine because the Docker daemon was not
-  running. Run `docker compose up --build` and report any build error before
-  treating the container path as verified.
+- The container image runs on Python 3.12 while local development used 3.14.7;
+  both pass the same HTTP checks, but the test suite is executed on the host.
+- No CI pipeline yet; tests and lint are run manually.
 
 ## Documentation
 

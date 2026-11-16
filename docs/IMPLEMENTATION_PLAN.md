@@ -56,8 +56,9 @@ errors. Verified in `backend/tests/`.
 corrupting data.
 Result: 39 tests pass; lint clean. Live HTTP smoke test imported 480 billing
 rows, 2,880 utilization rows, and a malformed file with 8 precise row errors.
-The Docker image build was not run because the local Docker daemon was stopped;
-`docker compose config` validates.
+`docker compose build` succeeded and both containers reported healthy;
+`docker compose up -d --wait` plus HTTP uploads against PostgreSQL returned the
+same counts as SQLite, with `amount` stored as `bigint` and `alembic_version=0001`.
 
 **Known limitations carried into Milestone 2**
 
