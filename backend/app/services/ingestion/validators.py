@@ -479,8 +479,8 @@ def validate_billing(
             duplicates_existing += 1
             reader.add_warning(
                 "duplicate_existing_record",
-                "This business key already exists from an earlier import; it is stored again and "
-                "may double-count until a dedupe policy is applied.",
+                "This business key already exists from an earlier import; the row is stored for "
+                "audit but excluded from spend analytics (earliest record wins).",
             )
 
         drafts.append(

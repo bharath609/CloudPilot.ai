@@ -7,9 +7,9 @@ row-level precision, and stores exact-decimal records that later milestones turn
 into spend analytics, waste findings, savings scenarios, forecasts and
 human-approved optimization plans.
 
-> **Status: Milestone 1 (backend + ingestion) is complete.** Cost analytics,
-> findings, forecasting, the AI advisor and the dashboard are intentionally not
-> built yet — see [Roadmap](#roadmap).
+> **Status: Milestones 1–2 (ingestion + cost analytics) are complete.** Findings,
+> forecasting, the AI advisor and the dashboard are intentionally not built yet
+> — see [Roadmap](#roadmap).
 >
 > **All sample data is synthetic.** The application holds no cloud credentials
 > and cannot create, resize, stop or delete any cloud resource.
@@ -38,8 +38,9 @@ will only ever explain numbers that deterministic code already computed.
 | Append-only import audit trail (SHA-256, row counts, raw rows) | ✅ Milestone 1 |
 | Paginated import/issue/record inspection API | ✅ Milestone 1 |
 | Alembic migrations, SQLite and PostgreSQL, Docker Compose | ✅ Milestone 1 |
-| 39 automated tests | ✅ Milestone 1 |
-| Spend summaries, trends, breakdowns | ⏳ Milestone 2 |
+| Spend summary, breakdown and trends with exact Decimal aggregation | ✅ Milestone 2 |
+| Currency-partitioned totals, business-key de-duplication | ✅ Milestone 2 |
+| 49 automated tests | ✅ Milestones 1–2 |
 | Findings, price catalogue, savings scenarios | ⏳ Milestone 3 |
 | Forecasts with evaluation | ⏳ Milestone 4 |
 | Evidence-grounded AI advisor | ⏳ Milestone 5 |
@@ -67,6 +68,7 @@ flowchart TD
   style B fill:#e8f5e9,stroke:#2e7d32
   style D fill:#e8f5e9,stroke:#2e7d32
   style E fill:#e8f5e9,stroke:#2e7d32
+  style F fill:#e8f5e9,stroke:#2e7d32
 ```
 
 Green nodes are implemented. Detailed design, decisions and trade-offs:
@@ -143,7 +145,7 @@ curl -s -F "file=@data/sample/utilization_sample.csv;type=text/csv" http://127.0
 
 Configuration lives in `.env` (copy `.env.example`). No secrets are required.
 
-## API (Milestone 1)
+## API (Milestones 1–2)
 
 | Method | Endpoint | Purpose |
 |---|---|---|
@@ -154,6 +156,35 @@ Configuration lives in `.env` (copy `.env.example`). No secrets are required.
 | GET | `/api/imports/{id}` | Import status, counts, stats, issue totals |
 | GET | `/api/imports/{id}/errors` | Paginated row-level issues, filter by `severity` |
 | GET | `/api/imports/{id}/records` | Preview normalized records for audit |
+| GET | `/api/costs/summary` | Spend totals by currency, row counts, data window |
+| GET | `/api/costs/breakdown` | Spend by `service`, `project`, `region`, `environment`, `provider`, `account` or `resource` |
+| GET | `/api/costs/trends` | Daily (`day`) or monthly (`month`) series |
+
+All three cost endpoints accept `start`, `end`, `currency`, `provider`,
+`account_id`, `service`, `region`, `environment` and `project`. `breakdown` adds
+`dimension` and `limit` (rows per currency, largest first — this is also the
+top-cost-driver view). `trends` adds `granularity`. Dates are inclusive.
+
+Example analytics response (abridged):
+
+```json
+{
+  "window": { "start": "2026-01-01", "end": "2026-03-01", "days": 60 },
+  "totals": [{ "currency": "USD", "amount": "1531.305850", "row_count": 480 }],
+  "row_count": 480,
+  "excluded_duplicate_rows": 0,
+  "import_ids": [1],
+  "import_count": 1,
+  "contains_sample_data": true,
+  "notes": [
+    "Amounts are exact decimals from imported billing rows; no FX conversion is applied.",
+    "Rows are de-duplicated by business key; the earliest stored record wins."
+  ]
+}
+```
+
+Amounts are JSON strings, never floats. Each currency is reported separately;
+there is no FX conversion and no combined multi-currency total.
 
 Example upload response (abridged):
 
@@ -210,15 +241,17 @@ retained in raw row data but ignored by analysis.
    so totals are exact on SQLite and PostgreSQL. A test asserts that
    `0.1 + 0.2 + 0.0000005` round-trips as `0.300001`, both through SQLAlchemy and
    through raw SQL.
-2. **Currencies are never silently mixed.** A multi-currency file is stored but
-   flagged `mixed_currency`; every record carries its ISO code and no FX
-   conversion exists yet.
+2. **Currencies are never silently mixed.** Totals are grouped by ISO currency,
+   and every record carries its code. A multi-currency file is stored but flagged
+   `mixed_currency`. No FX conversion exists, so a USD total and a EUR total are
+   never added together.
 3. **Bad rows never corrupt good data.** Structural errors reject the whole file.
    Row errors persist only the valid rows and report each rejected row with a
    row number, column, code and message. `CLOUDPILOT_STRICT_IMPORTS=true` switches
    to all-or-nothing.
-4. **Replays are visible.** SHA-256 rejects byte-identical uploads with `409`;
-   forced replays and overlapping business keys are flagged, not hidden.
+4. **Replays never double-count.** SHA-256 rejects byte-identical uploads with
+   `409`; forced replays are stored for audit but analytics keep only the
+   earliest row per business key and report `excluded_duplicate_rows`.
 5. **No cloud access.** There is no provider SDK and no write path.
 
 | Situation | Persisted | Status |
@@ -240,7 +273,7 @@ cd backend
 Actual result on this machine (Python 3.14.7, 16 Nov 2026):
 
 ```text
-39 passed, 1 warning in 11.28s
+49 passed, 1 warning in 14.86s
 All checks passed!
 ```
 
@@ -248,7 +281,8 @@ The single warning is an upstream Starlette notice that `httpx` should be
 replaced by `httpx2`; it is not from this project. Coverage includes exact
 totals against a hand-read CSV fixture, malformed encodings, NUL bytes, oversized
 uploads, duplicate headers, missing columns, row limits, duplicate detection,
-account masking, strict mode, pagination and transaction integrity.
+account masking, strict mode, pagination, transaction integrity, and
+hand-calculated analytics totals with per-currency shares and de-duplication.
 
 ### Container path verified
 
@@ -257,9 +291,12 @@ On the same machine, `docker compose build` completed and
 the samples against `http://127.0.0.1:8000` (PostgreSQL 16) returned the same
 results as the SQLite run: billing `valid` 480/480, utilization `valid` 2,880/2,880,
 malformed billing `partial` 2 accepted / 8 rejected, amounts serialized as
-strings, and `alembic_version = 0001`. In PostgreSQL, `cost_records.amount` is
-stored as `bigint`, so `SUM(amount)` is exact integer addition. `docker compose
-config --quiet` also passes.
+strings, and `alembic_version = 0001`. The analytics endpoints also matched
+SQLite exactly (USD `1531.305850`, the same top-five services and the same three
+monthly buckets); a forced re-import reported 480 duplicate warnings and
+`excluded_duplicate_rows=480` without changing any total. In PostgreSQL,
+`cost_records.amount` is stored as `bigint`, so `SUM(amount)` is exact integer
+addition. `docker compose config --quiet` also passes.
 
 ## 5-minute demo
 
@@ -276,10 +313,16 @@ config --quiet` also passes.
    original import ID. Retry with `?force=true` to see overlap warnings.
 7. Fetch `/api/imports/{id}/records` and note that amounts are strings such as
    `"4.482123"` — exact decimals, not floats.
-8. Run the tests and show the green output above.
+8. Open `/api/costs/summary`: USD `1531.305850` over 480 rows for
+   `2026-01-01..2026-03-01`. The same total comes from a plain `Decimal` read of
+   the CSV, not from the database path.
+9. Open `/api/costs/breakdown?dimension=service&limit=5` and
+   `/api/costs/trends?granularity=month`; shares are percentages of one currency
+   and the three monthly buckets add back to the same total.
+10. Run the tests and show the green output above.
 
-Findings, savings, forecasts and AI explanations are not part of Milestone 1 and
-are not simulated in the demo.
+Findings, savings, forecasts and AI explanations are not part of Milestones 1–2
+and are not simulated in the demo.
 
 ## Repository layout
 
@@ -288,15 +331,16 @@ CloudPilot AI/
 ├── backend/
 │   ├── app/
 │   │   ├── main.py                 # app factory, lifespan, error envelope
-│   │   ├── api/{deps.py,routes/}   # health + import endpoints
+│   │   ├── api/{deps.py,routes/}   # health, import and cost endpoints
 │   │   ├── core/                   # settings, enums, errors, UTC helpers
 │   │   ├── db/                     # engine, exact decimal types, ORM models
 │   │   ├── schemas/                # Pydantic response contracts
 │   │   └── services/
 │   │       ├── ingestion/          # CSV parser, validators, typed drafts
-│   │       └── imports/            # transaction orchestration + lookups
+│   │       ├── imports/            # transaction orchestration + lookups
+│   │       └── analytics.py        # Decimal aggregations + de-duplication
 │   ├── alembic/                    # migration 0001 initial schema
-│   ├── tests/                      # 39 pytest tests
+│   ├── tests/                      # 49 pytest tests
 │   └── pyproject.toml
 ├── data/
 │   ├── sample/                     # synthetic valid + malformed CSVs
@@ -323,7 +367,8 @@ CloudPilot AI/
 
 | Milestone | Scope | Exit check |
 |---|---|---|
-| **M2** | Decimal spend summaries, trends, breakdowns by service/project/region/environment | Totals and groupings match hand-calculated fixtures |
+| ✅ **M1** | Ingestion, validation, exact-decimal storage, import audit | Totals exact; malformed rows reported precisely |
+| ✅ **M2** | Decimal spend summaries, trends, breakdowns with currency partitioning and business-key de-duplication | Totals and groupings match hand-calculated fixtures |
 | **M3** | Idle/over-provisioned detection rules, sourced price catalogue, savings scenarios | Every finding links to evidence; every saving is reproducible |
 | **M4** | Transparent forecasting with train/test split and error metrics | Forecast reproducible and evaluated |
 | **M5** | Evidence-bounded AI advisor (local model preferred), typed output, injection tests | AI explains without inventing prices or changing totals |
@@ -345,15 +390,21 @@ Details and open questions: [`docs/IMPLEMENTATION_PLAN.md`](docs/IMPLEMENTATION_
 
 Full STRIDE-style analysis: [`docs/THREAT_MODEL.md`](docs/THREAT_MODEL.md).
 
-## Known limitations (Milestone 1)
+## Known limitations (Milestones 1–2)
 
-- No cost analytics endpoints yet; raw normalized records are inspectable but
-  totals per service/project are Milestone 2.
+- Analytics are read-only and computed on demand; there is no materialized cache.
+  Fine at local sample sizes, but large exports will need pre-aggregation.
+- De-duplication matches the exact business key
+  (`usage_date, provider, account_id, service, resource_id, usage_unit, amount`).
+  A restated export with a *changed* amount is a new key and is counted in
+  addition to the original; supersede/version semantics are not implemented.
+- Breakdowns apply `limit` per currency, so a multi-currency response can contain
+  more than `limit` items in total.
+- Shares are rounded to three decimal places per row; they may not sum to exactly
+  `100.000` when many small groups exist.
 - No authentication, rate limiting or TLS.
 - No UI yet; use `/docs` or `curl`.
 - Imports are append-only; there is no rollback/delete endpoint.
-- Re-uploading an overlapping billing export warns but still stores the rows;
-  a dedupe policy is an open question before analytics ships.
 - `usage_unit` is shape-checked, not validated against a per-service allowlist.
 - Utilization metrics reference billing resources by string ID; there is no
   resource inventory table yet.

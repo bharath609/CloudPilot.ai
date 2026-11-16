@@ -43,7 +43,7 @@ CloudPilot AI/
 │   ├── alembic/                 # migrations (0001 initial schema)
 │   ├── app/
 │   │   ├── main.py              # app factory, lifespan, exception handlers
-│   │   ├── api/routes/          # health.py, imports.py
+│   │   ├── api/routes/          # health.py, imports.py, costs.py
 │   │   ├── core/
 │   │   │   ├── config.py        # typed settings (pydantic-settings)
 │   │   │   ├── errors.py        # AppError taxonomy + error envelope
@@ -52,6 +52,7 @@ CloudPilot AI/
 │   │   │   ├── base.py          # Base, engine/session factory, get_db
 │   │   │   └── models.py        # ORM tables
 │   │   ├── schemas/             # Pydantic request/response models
+│   │   ├── services/analytics.py # Decimal spend aggregation + de-duplication
 │   │   ├── services/ingestion/  # csv_reader, validators, billing, utilization
 │   │   └── services/imports/    # import orchestration + queries
 │   ├── tests/                   # pytest suite + fixtures
@@ -125,6 +126,7 @@ file (422), oversized file (413) and exact duplicate (409).
 | `schemas` | Typed contracts, JSON shapes | touch the DB |
 | `services/ingestion` | Parsing, validation, normalization | perform commits |
 | `services/imports` | Orchestration, transaction boundary, audit | parse CSV syntax |
+| `services/analytics` | Read-only Decimal aggregation, de-duplication | mutate data or call an LLM |
 | `db` | Persistence, exact types | know about HTTP |
 | `llm` (M5) | Explanation only | calculate or mutate data |
 
@@ -149,7 +151,45 @@ Every issue has `row_number` (1-based data row, header excluded), `column`,
 `code`, `message`, `severity` and a truncated `raw_value`. Error codes are
 catalogued in `docs/DATA_DICTIONARY.md`.
 
-## 7. Data model (Milestone 1 subset)
+### 6.1 Analytics query path (Milestone 2)
+
+`services/analytics.py` turns a `CostScope` (inclusive dates + dimension filters)
+into three read-only responses. There is no cache and no write path.
+
+```text
+GET /api/costs/{summary|breakdown|trends}
+        |
+        v
+CostScope -> SQL filters -> business-key de-duplication -> GROUP BY
+        |                                                        |
+        |                                          currency, dimension/bucket
+        v                                                        v
+  effective window                              integer SUM(micros)
+                                                         |
+                                               Decimal(scale -6)
+                                                         |
+                                          Pydantic JSON (string amounts)
+```
+
+Key properties:
+
+- **Exact sums.** `amount` is stored as scaled `BIGINT`; every aggregate uses
+  `SUM(CAST(amount AS BIGINT))` and converts the integer to `Decimal` in Python.
+  No `float` is created at any point.
+- **Currency partitioning.** Every `GROUP BY` includes `currency`; responses
+  contain per-currency totals and shares. A multi-currency response never exposes
+  a combined total.
+- **Business-key de-duplication.** A scalar subquery keeps
+  `MIN(id)` per `(usage_date, provider, account_id, service, resource_id,
+  usage_unit, amount)`; later re-imports are stored but excluded. The response
+  reports `excluded_duplicate_rows`, so the adjustment is visible rather than
+  silent.
+- **Stable bucketing.** Daily rows are aggregated in SQL; month rollup happens in
+  Python with `Decimal` addition, avoiding dialect-specific date functions.
+- **Rounding.** Group shares are quantized to 3 decimal places with `ROUND_HALF_UP`;
+  totals stay at 6 decimal places and are never re-rounded.
+
+## 7. Data model
 
 ```mermaid
 erDiagram
@@ -232,6 +272,8 @@ with a `kind` column. See ADR-004.
 | ADR-006 | Partial imports by default | Real exports often contain a few bad rows | Totals must be read alongside import status |
 | ADR-007 | Append-only imports | Audit trail integrity | No delete/rollback endpoint in M1 |
 | ADR-008 | UTC everywhere | Avoid DST ambiguity in cost windows | Naive input timestamps are treated as UTC and flagged in docs |
+| ADR-009 | Billing duplicates stored but excluded from analytics | Corrected exports remain importable while totals stay single-counted | Changed-amount restatements are new business keys; supersede semantics postponed |
+| ADR-010 | Analytics partition every aggregate by currency | Prevents silent FX mixing | Multi-currency responses need per-currency presentation in the UI |
 
 ## 9. Deployment
 

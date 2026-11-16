@@ -13,7 +13,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy.engine import make_url
 
-from app.api.routes import health, imports
+from app.api.routes import costs, health, imports
 from app.core.config import Settings, get_settings
 from app.core.errors import AppError
 from app.db.base import Database
@@ -103,6 +103,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     app.include_router(health.router)
     app.include_router(imports.router, prefix=resolved.api_prefix)
+    app.include_router(costs.router, prefix=resolved.api_prefix)
     return app
 
 

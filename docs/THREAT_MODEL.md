@@ -52,8 +52,8 @@ flowchart LR
 | T4 | Malformed encoding / NUL bytes | Parser crash, log corruption | Strict UTF-8 decode, NUL rejection, CR/LF normalization | — |
 | T5 | SQL injection via IDs or filenames | Data loss | SQLAlchemy parameterized queries; filename reduced to basename; no dynamic SQL | — |
 | T6 | Path traversal via filename | File disclosure | Filename never used for reading/writing; `Path(name).name` only stored | — |
-| T7 | Duplicate/replayed import silently doubles spend | Wrong analytics | SHA-256 exact-duplicate 409; within-file duplicate errors; cross-import billing warnings; utilization duplicates skipped as errors | Billing dedupe policy is an open question |
-| T8 | Mixed currencies summed silently | Wrong totals | Currency allowlist, per-import currency set, `mixed_currency` warning | Aggregation must partition by currency (M2) |
+| T7 | Duplicate/replayed import silently doubles spend | Wrong analytics | SHA-256 exact-duplicate 409; within-file duplicate errors; cross-import billing rows stored but excluded from analytics by business key; utilization duplicates rejected | Changed-amount restatements are still separate keys (documented) |
+| T8 | Mixed currencies summed silently | Wrong totals | Currency allowlist; every analytics aggregate groups by currency; import flags `mixed_currency` | UI must render per currency (M6) |
 | T9 | Unmasked account identifiers leak into DB/screenshots | Privacy | 12-digit account IDs masked to `****1234` with warning; sample uses `demo-` IDs | GUID/subscription IDs masking in a provider adapter |
 | T10 | Partial import hides data loss | Wrong savings decisions | Status `partial`/`invalid` surfaced on every import response; rejected rows never persisted | UI warning banner (M6) |
 | T11 | Non-finite / float money drift | Wrong totals | `Decimal` parsing rejects NaN/Inf; exact scaled-BIGINT storage; round-trip tests | — |
@@ -96,7 +96,8 @@ flowchart LR
 | Decimal-only money | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Parameterized queries | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | No cloud write credentials | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| Currency partitioning | ⚠️ flagged | required | required | required | required | required | required |
+| Currency partitioning | ✅ flagged | ✅ enforced | required | required | required | required | required |
+| Business-key de-duplication | ✅ warned | ✅ excluded | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Evidence-linked savings | | | required | | | | |
 | LLM schema + numeral validation | | | | | required | | |
 | Prompt-injection tests | | | | | required | | |

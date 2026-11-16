@@ -206,6 +206,40 @@ Consequences:
 - Analytics must convert at the boundary: `Decimal(scaled) / Decimal(10**6)`.
 - Currency conversion is not implemented and must not be attempted implicitly.
 
+### 5.1 Analytics response fields (Milestone 2)
+
+| Field | Type | Meaning |
+|---|---|---|
+| `window.start` / `window.end` | ISO date | Inclusive usage-date window actually applied |
+| `window.days` | integer | `end - start + 1`, or `null` when no bound is known |
+| `totals[].currency` | ISO 4217 | Currency of that total; never merged with another |
+| `totals[].amount` | decimal string | Exact sum of `cost_records.amount`, 6 dp |
+| `totals[].row_count` | integer | De-duplicated rows contributing to the total |
+| `row_count` | integer | Sum of `totals[].row_count` across currencies |
+| `excluded_duplicate_rows` | integer | Stored rows skipped because their business key already existed |
+| `import_ids` | integer[] | Imports that contributed at least one counted row |
+| `contains_sample_data` | boolean | True when any contributing import has `source = sample` |
+| `dimension` | enum | `service`, `project`, `region`, `environment`, `provider`, `account`, `resource` |
+| `items[].key` | string | Dimension value for this row |
+| `items[].share_pct` | decimal string | Share of **that currency's** total, 3 dp, HALF_UP |
+| `total_groups` | integer | Groups before the per-currency `limit` |
+| `items_truncated` | boolean | True when `items` was cut by `limit` |
+| `points[].bucket` | string | `YYYY-MM-DD` for daily, `YYYY-MM` for monthly |
+| `granularity` | enum | `day` or `month` |
+
+De-duplication key (identical to the importer's business key):
+
+```
+usage_date + provider + account_id + service + resource_id + usage_unit + amount
+```
+
+The earliest stored row (`MIN(id)`) wins. Re-imported rows remain in
+`cost_records` for audit and appear in `/api/imports/{id}/records`; they are
+excluded only from analytics.
+
+`unit_price` / FX rates do not exist in this milestone. No price or exchange rate
+is inferred, looked up or generated.
+
 ---
 
 ## 6. Validation codes
@@ -242,7 +276,7 @@ Consequences:
 | `invalid_text` | error | Control characters in a text field |
 | `unknown_unit` | warning | Unit not in known set |
 | `duplicate_row` | error | Business key repeated in this file |
-| `duplicate_existing_record` | warning (billing) / error (utilization) | Business key exists from an earlier import. Billing rows are stored with a warning because exports can be restated; utilization rows are skipped because a duplicated sample would double-count |
+| `duplicate_existing_record` | warning (billing) / error (utilization) | Business key exists from an earlier import. Billing rows are stored with a warning for audit but excluded from analytics (earliest row wins); utilization rows are skipped because a duplicated sample would double-count |
 | `p95_below_average` | warning | p95 < average, sample likely inconsistent |
 | `resource_not_in_billing` | warning | Utilization resource has no billing rows |
 | `account_id_masked` | warning | 12-digit account ID was masked before storage |

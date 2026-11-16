@@ -38,5 +38,22 @@ class Environment(StrEnum):
     UNKNOWN = "unknown"
 
 
+class CostDimension(StrEnum):
+    """Dimensions that spend can be grouped by."""
+
+    SERVICE = "service"
+    PROJECT = "project"
+    REGION = "region"
+    ENVIRONMENT = "environment"
+    PROVIDER = "provider"
+    ACCOUNT = "account"
+    RESOURCE = "resource"
+
+
+class TrendGranularity(StrEnum):
+    DAY = "day"
+    MONTH = "month"
+
+
 PROVIDERS = frozenset(provider.value for provider in Provider)
 ENVIRONMENTS = frozenset(environment.value for environment in Environment)

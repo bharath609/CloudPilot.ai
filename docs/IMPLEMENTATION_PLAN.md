@@ -3,8 +3,8 @@
 > Status key: `DONE` · `IN PROGRESS` · `PLANNED` · `BLOCKED`
 >
 > This plan follows the milestone order in `CloudPilot_AI_Full_Guide.md` §14.
-> Only Milestone 1 is implemented so far. Later milestones are deliberately not
-> started until the previous one is reviewed and approved.
+> Milestones 1–2 are implemented. Later milestones are deliberately not started
+> until the previous one is reviewed and approved.
 
 ## 1. Guiding constraints
 
@@ -34,7 +34,7 @@ malformed rows for tests.
 Result: conforming files import cleanly; malformed fixtures produce row-level
 errors. Verified in `backend/tests/`.
 
-### Milestone 1 — Backend and ingestion — `DONE` (awaiting review)
+### Milestone 1 — Backend and ingestion — `DONE`
 
 | Task | Status |
 |---|---|
@@ -54,31 +54,67 @@ errors. Verified in `backend/tests/`.
 
 **Exit check:** valid CSV imports; invalid CSV reports precise errors without
 corrupting data.
-Result: 39 tests pass; lint clean. Live HTTP smoke test imported 480 billing
+Result: 39 tests passed at the M1 exit (49 now, including M2 analytics); lint clean. Live HTTP smoke test imported 480 billing
 rows, 2,880 utilization rows, and a malformed file with 8 precise row errors.
 `docker compose build` succeeded and both containers reported healthy;
 `docker compose up -d --wait` plus HTTP uploads against PostgreSQL returned the
 same counts as SQLite, with `amount` stored as `bigint` and `alembic_version=0001`.
+Milestone 2 analytics on PostgreSQL matched SQLite exactly
+(USD `1531.305850`, identical top-five services and monthly buckets), and a
+forced re-import reported `excluded_duplicate_rows=480` with unchanged totals.
 
 **Known limitations carried into Milestone 2**
 
-- Cross-import duplicate rows are reported as warnings, not skipped, so
-  re-uploaded corrected exports can be loaded. Analytics must therefore scope by
-  import until a dedupe policy is approved.
+- Cross-import duplicate rows are stored with a warning; analytics exclude them
+  by business key (resolved in Milestone 2).
 - No authentication or multi-tenancy yet (local-first MVP, threat model §6).
 - `usage_unit` is validated for shape, not against a per-service unit allowlist.
 - Import rollback/void is not exposed. Imports are append-only for auditability.
 - Forecast and price ingestion are not implemented (Milestones 3–4).
 
-### Milestone 2 — Cost analytics — `PLANNED`
+### Milestone 2 — Cost analytics — `DONE` (awaiting review)
 
-- Decimal aggregations by service, project, region, environment, provider.
-- Currency-partitioned responses; reject mixed-currency totals.
-- Trends (daily/monthly) and top cost drivers.
-- Hand-calculated fixtures; SQL and Python totals must match.
-- Scope default: single import or explicit date range.
+Approved decisions before starting:
+
+| Decision | Choice |
+|---|---|
+| Database default | Keep SQLite for local dev; PostgreSQL via Compose |
+| Import policy | Partial by default; strict via `CLOUDPILOT_STRICT_IMPORTS` |
+| Cross-import duplicates | Store for audit, exclude from analytics (earliest business key wins) |
+| LLM provider (M5) | Local Ollama, optional and disabled by default |
+| Export priority (M6) | Markdown + CSV first, PDF later |
+
+| Task | Status |
+|---|---|
+| `GET /api/costs/summary` — totals by currency, row counts, window, import provenance | DONE |
+| `GET /api/costs/breakdown` — service/project/region/environment/provider/account/resource | DONE |
+| `GET /api/costs/trends` — daily and monthly, currency-partitioned | DONE |
+| Filters: inclusive date window, currency, provider, account, service, region, environment, project | DONE |
+| Currency partitioning; mixed-currency responses never summed | DONE |
+| Business-key de-duplication + `excluded_duplicate_rows` disclosure | DONE |
+| `Decimal` aggregation over scaled `BIGINT` (`SUM` is integer addition) | DONE |
+| Hand-calculated fixture tests; per-currency share rounding | DONE |
 
 **Exit check:** totals and groupings match known test cases.
+Result: 49 tests pass; lint clean. All amounts are exact `Decimal` strings.
+Independent verification: a plain `Decimal` read of
+`data/sample/billing_sample.csv` produced USD `1531.305850`; the live API
+(`/api/costs/summary`), the service breakdown (top five services) and the monthly
+trend (Jan `791.676052`, Feb `714.440385`, Mar `25.189413`) matched it exactly.
+Forced re-import of a 5-row fixture stored 5 rows but `excluded_duplicate_rows=5`
+kept totals unchanged.
+
+**Known limitations carried into Milestone 3**
+
+- De-duplication uses the exact business key. A restated export with a changed
+  amount is a new key and is counted in addition to the original; supersede
+  semantics are not implemented.
+- Breakdown `limit` is per currency, so multi-currency responses can exceed it.
+- Shares are rounded to 3 dp per row and may not sum to exactly `100.000`.
+- Aggregations run on every request; no cache or pre-aggregation yet.
+- No authentication or multi-tenancy yet (local-first MVP, threat model §6).
+- `usage_unit` is validated for shape, not against a per-service unit allowlist.
+- Import rollback/void is not exposed. Imports are append-only for auditability.
 
 ### Milestone 3 — Resource analysis and savings scenarios — `PLANNED`
 
@@ -99,9 +135,9 @@ reproducible.
 
 **Exit check:** forecast reproducible and evaluated on held-out periods.
 
-### Milestone 5 — AI advisor — `PLANNED` (requires approval: may use external API)
+### Milestone 5 — AI advisor — `PLANNED`
 
-- Provider adapter (local Ollama by default; OpenRouter only with user consent).
+- Provider adapter: local Ollama by default, optional and disabled; no paid API.
 - Bounded evidence package, typed JSON output, evidence-ID validation.
 - Reject numeric price/savings claims absent from the package.
 - Timeout, retry, redaction, deterministic fallback explanation.
@@ -124,7 +160,7 @@ reproducible.
 - Docker image hardening, screenshots, architecture diagram, demo dataset.
 - README 5-minute demo, tag `v1.0.0`.
 
-## 3. Milestone 1 API surface (implemented)
+## 3. API surface (implemented)
 
 | Method | Path | Purpose |
 |---|---|---|
@@ -135,8 +171,11 @@ reproducible.
 | GET | `/api/imports/{id}` | Import detail + summary counts |
 | GET | `/api/imports/{id}/errors` | Paginated row-level issues |
 | GET | `/api/imports/{id}/records` | Preview normalized rows (audit/debug) |
+| GET | `/api/costs/summary` | Spend totals by currency + data window |
+| GET | `/api/costs/breakdown` | Spend by dimension, largest first |
+| GET | `/api/costs/trends` | Daily/monthly series by currency |
 
-The remaining endpoints from guide §11 (`/api/costs/*`, `/api/analysis/*`, …)
+The remaining endpoints from guide §11 (`/api/analysis/*`, `/api/findings/*`, …)
 arrive in their own milestones.
 
 ## 4. Key risks
@@ -151,15 +190,15 @@ arrive in their own milestones.
 | Scope creep | One milestone per review, explicit exit checks | all |
 | Synthetic data mistaken for live | `data_source` field, UI badge, README banner | M1/M6 |
 
-## 5. Open questions for the user
+## 5. Decisions (resolved before Milestone 2)
 
-1. **Database default:** SQLite for local dev + PostgreSQL in Compose is the
-   current split. Keep it, or require PostgreSQL everywhere?
-2. **Partial imports:** current behaviour keeps valid rows and reports bad ones.
-   Should the default instead be all-or-nothing (`CLOUDPILOT_STRICT_IMPORTS=true`)?
-3. **Duplicate policy across imports:** warning (current) vs skip vs reject.
-4. **LLM provider for Milestone 5:** local Ollama (free/offline) preferred over a
-   paid API? No provider will be added without approval.
-5. **Report export format priority:** Markdown + CSV first, or PDF required?
+1. **Database default:** SQLite for local dev; PostgreSQL via Docker Compose.
+2. **Partial imports:** partial is the default; strict is opt-in via
+   `CLOUDPILOT_STRICT_IMPORTS=true`.
+3. **Cross-import duplicates:** store for audit, exclude from analytics by exact
+   business key (earliest stored row wins). `excluded_duplicate_rows` discloses it.
+4. **LLM provider:** local Ollama only, optional and disabled by default; no paid
+   API.
+5. **Export priority:** Markdown + CSV first in Milestone 6, PDF later.
 
-Defaults are in place, so none of these block Milestone 1.
+No open questions block Milestone 3. New decisions will be recorded here.

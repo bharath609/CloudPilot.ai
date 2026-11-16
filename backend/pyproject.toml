@@ -46,5 +46,5 @@ select = ["E", "F", "I", "B", "UP", "C4", "SIM"]
 ignore = ["B008"]
 
 [tool.ruff.lint.per-file-ignores]
-"tests/*" = ["S101"]
+"tests/*" = ["S101", "E501"]
 "alembic/versions/*" = ["E501"]
