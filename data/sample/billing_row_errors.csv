@@ -1,0 +1,11 @@
+usage_date,provider,account_id,service,resource_id,region,environment,project,usage_quantity,usage_unit,cost_amount,currency,tag_team,tag_owner
+2026-02-01,aws,demo-aws-account-001,Amazon EC2,i-demo-dup-001,eu-west-1,dev,sandbox,24,Hrs,10.000000,USD,platform,platform@example.test
+2026-02-01,aws,demo-aws-account-001,Amazon EC2,i-demo-dup-001,eu-west-1,dev,sandbox,24,Hrs,10.000000,USD,platform,platform@example.test
+2026-02-30,aws,demo-aws-account-001,Amazon EC2,i-demo-dup-002,eu-west-1,dev,sandbox,24,Hrs,10.000000,USD,platform,platform@example.test
+2026-02-02,aws,demo-aws-account-001,Amazon EC2,i-demo-dup-003,eu-west-1,dev,sandbox,24,Hrs,-5.000000,USD,platform,platform@example.test
+2026-02-03,aws,demo-aws-account-001,Amazon EC2,i-demo-dup-004,eu-west-1,dev,sandbox,24,Hrs,10.000000,XYZ,platform,platform@example.test
+2026-02-04,oracle,demo-oracle-001,Compute,i-demo-dup-005,eu-frankfurt-1,dev,sandbox,24,Hrs,10.000000,USD,platform,platform@example.test
+2026-02-05,aws,demo-aws-account-001,Amazon EC2,i-demo-dup-006,eu-west-1,production,sandbox,24,Hrs,10.000000,USD,platform,platform@example.test
+2026-02-06,aws,demo-aws-account-001,,i-demo-dup-007,eu-west-1,dev,sandbox,24,Hrs,10.000000,USD,platform,platform@example.test
+2026-02-07,aws,demo-aws-account-001,Amazon EC2,i-demo-dup-008,eu-west-1,dev,sandbox,24,Hrs,NaN,USD,platform,platform@example.test
+2026-02-08,aws,demo-aws-account-001,Amazon S3,i-demo-dup-009,eu-west-1,dev,sandbox,1,GB-Mo,12.500000,USD,platform,platform@example.test

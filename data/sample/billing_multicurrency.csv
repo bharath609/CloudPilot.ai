@@ -1,0 +1,3 @@
+usage_date,provider,account_id,service,resource_id,region,environment,project,usage_quantity,usage_unit,cost_amount,currency,tag_team,tag_owner
+2026-02-10,aws,demo-aws-account-001,Amazon EC2,i-demo-fx-001,eu-west-1,dev,sandbox,24,Hrs,4.608000,USD,platform,platform@example.test
+2026-02-10,azure,demo-azure-subscription-001,Virtual Machines,vm-demo-fx-002,westeurope,dev,sandbox,24,Hrs,3.984000,EUR,platform,platform@example.test

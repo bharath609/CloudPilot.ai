@@ -1,0 +1,2 @@
+usage_date,provider,account_id,service,resource_id,region,environment,project,usage_quantity,usage_unit,currency,tag_team,tag_owner
+2026-02-01,aws,demo-aws-account-001,Amazon EC2,i-demo-missing-001,eu-west-1,dev,sandbox,24,Hrs,USD,platform,platform@example.test
