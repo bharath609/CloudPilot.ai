@@ -81,7 +81,7 @@ Approved decisions before starting:
 | Database default | Keep SQLite for local dev; PostgreSQL via Compose |
 | Import policy | Partial by default; strict via `CLOUDPILOT_STRICT_IMPORTS` |
 | Cross-import duplicates | Store for audit, exclude from analytics (earliest business key wins) |
-| LLM provider (M5) | Local Ollama, optional and disabled by default |
+| LLM provider (M5) | Provider-agnostic OpenAI-compatible free-tier API (Groq documented default; Gemini/OpenRouter/Ollama interchangeable), optional and disabled by default; no paid API |
 | Export priority (M6) | Markdown + CSV first, PDF later |
 
 | Task | Status |
@@ -192,7 +192,14 @@ stack and volume were removed with `docker compose down -v`.
 
 ### Milestone 5 — AI advisor — `PLANNED`
 
-- Provider adapter: local Ollama by default, optional and disabled; no paid API.
+- Provider adapter: OpenAI-compatible client for free-tier APIs (Groq documented
+  default; Gemini, OpenRouter and local Ollama interchangeable via `.env`).
+  Optional and disabled by default; no paid API and no key committed.
+- Configuration: `CLOUDPILOT_LLM_ENABLED`, `CLOUDPILOT_LLM_BASE_URL`,
+  `CLOUDPILOT_LLM_MODEL`, `CLOUDPILOT_LLM_API_KEY`. A missing key or a disabled
+  flag falls back to the deterministic explanation.
+- Only a bounded, redacted evidence package leaves the machine; raw billing files
+  are never sent.
 - Bounded evidence package, typed JSON output, evidence-ID validation.
 - Reject numeric price/savings claims absent from the package.
 - Timeout, retry, redaction, deterministic fallback explanation.
@@ -257,8 +264,9 @@ arrive in their own milestones.
    `CLOUDPILOT_STRICT_IMPORTS=true`.
 3. **Cross-import duplicates:** store for audit, exclude from analytics by exact
    business key (earliest stored row wins). `excluded_duplicate_rows` discloses it.
-4. **LLM provider:** local Ollama only, optional and disabled by default; no paid
-   API.
+4. **LLM provider:** one OpenAI-compatible adapter for free-tier APIs (Groq
+   documented default; Gemini, OpenRouter or local Ollama by configuration).
+   Optional and disabled by default; no paid API and no key in the repository.
 5. **Export priority:** Markdown + CSV first in Milestone 6, PDF later.
 6. **Waste rules:** idle and rightsizing thresholds above; every threshold is a
    setting (`CLOUDPILOT_IDLE_*`, `CLOUDPILOT_RIGHTSIZE_*`,

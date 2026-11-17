@@ -491,7 +491,7 @@ CloudPilot AI/
 | ✅ **M2** | Decimal spend summaries, trends, breakdowns with currency partitioning and business-key de-duplication | Totals and groupings match hand-calculated fixtures |
 | ✅ **M3** | Idle/over-provisioned detection rules, sourced price catalogue, savings scenarios | Every finding links to evidence; every saving is reproducible |
 | **M4** | Transparent forecasting with train/test split and error metrics | Forecast reproducible and evaluated |
-| **M5** | Evidence-bounded AI advisor (local model preferred), typed output, injection tests | AI explains without inventing prices or changing totals |
+| **M5** | Evidence-bounded AI advisor on a free OpenAI-compatible API (Groq default; Gemini/OpenRouter/Ollama interchangeable), typed output, injection tests | AI explains without inventing prices or changing totals |
 | **M6** | React dashboard, filters, sample-data badge, approvals, exports | Full workflow in the browser |
 | **M7** | CI, release hardening, screenshots, `v1.0.0` | `docker compose up --build` demo passes from scratch |
 

@@ -92,8 +92,11 @@ flowchart LR
 4. Error messages echo a truncated `raw_value`, which could include sensitive
    strings. Truncation at 200 chars limits, but does not eliminate, exposure.
 5. No rate limiting; a local user can exhaust disk by importing repeatedly.
-6. The AI advisor will be opt-in and default to a local model to avoid sending
-   billing context to a third party.
+6. The AI advisor will be opt-in and disabled by default. When enabled, it uses
+   an OpenAI-compatible free-tier provider (Groq documented default; Gemini,
+   OpenRouter or local Ollama interchangeable). Only a bounded, redacted evidence
+   package is sent; raw billing files never leave the machine. A missing key or
+   any provider error falls back to the deterministic explanation.
 
 ## 7. Security checklist per milestone
 
