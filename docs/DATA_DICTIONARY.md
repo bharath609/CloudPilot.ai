@@ -1,9 +1,9 @@
 # CloudPilot AI — Data Dictionary
 
-Version 1.2 — covers Milestones 1–4 (imports, cost records, utilization
+Version 1.3 — covers Milestones 1–5 (imports, cost records, utilization
 metrics, validation issues, price catalogue, analysis runs, findings, savings
-scenarios and forecasts). Money fields are `decimal.Decimal` in Python and
-stored exactly as scaled integers (see §5). All timestamps are UTC.
+scenarios, forecasts and advisor reports). Money fields are `decimal.Decimal` in
+Python and stored exactly as scaled integers (see §5). All timestamps are UTC.
 
 ---
 
@@ -321,6 +321,38 @@ One predicted day per currency per run.
 | `method` | enum text | Copied from the run |
 | `created_at` | timestamptz | |
 
+### 4.11 `advisor_reports`
+
+One immutable record per `POST /api/reports/generate`. It stores both the exact
+bounded package that was eligible to leave the machine and the validated output
+(or deterministic fallback).
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | integer PK | |
+| `status` | varchar(16) | `completed` when AI output was accepted, else `fallback` |
+| `mode` | varchar(16) | `llm` or `deterministic` |
+| `ai_used` | boolean | True only after schema, evidence-ID and numeric validation |
+| `provider` | varchar(64), null | Configured provider label when a call was attempted |
+| `model` | varchar(120), null | Model name from the response, or configured model when attempted |
+| `analysis_run_id` | FK → `analysis_runs.id`, null | `ON DELETE SET NULL` |
+| `forecast_run_id` | FK → `forecast_runs.id`, null | `ON DELETE SET NULL` |
+| `fallback_reason` | varchar(64), null | Machine-readable reason code (below) |
+| `validation_errors` | json string[] | Up to 20 rejection details |
+| `evidence_sha256` | char(64) | SHA-256 of the canonical serialized package |
+| `evidence` | json object | Bounded, redacted package; no raw CSV bytes or tags |
+| `output` | json object | Validated typed output or deterministic fallback |
+| `notes` | json string[] | Provenance/validation notes |
+| `warnings` | json string[] | Human review and synthetic-data warnings |
+| `attempts` | integer | Provider attempts used (0 when no call) |
+| `latency_ms` | integer | Last provider call latency (0 when no call) |
+| `duration_ms` | integer | Total report runtime |
+| `created_at` / `completed_at` | timestamptz | |
+
+No money column exists in this table: amounts inside `evidence`/`output` are
+mirrored strings from the deterministic records, so the advisor cannot introduce
+or alter a stored cost.
+
 ---
 
 ## 5. Exact money storage (ADR-002)
@@ -463,6 +495,50 @@ width = empirical q-quantile of |actual - predicted| over the holdout
 
 No FX is applied. Each currency is forecast and totalled separately; the response
 contains no combined total.
+
+### 5.4 Advisor report fields (Milestone 5)
+
+| Field | Type | Meaning |
+|---|---|---|
+| `status` | enum | `completed` (AI accepted) or `fallback` |
+| `mode` | enum | `llm` or `deterministic` |
+| `ai_used` | boolean | True only when the model answer passed every check |
+| `provider` / `model` | string or null | Provider label / returned model, when a call was attempted |
+| `analysis_run_id` / `forecast_run_id` | integer or null | Immutable inputs used for the package |
+| `fallback_reason` | string or null | Why deterministic output was used (table below) |
+| `validation_errors` | string[] | Concrete rejections, e.g. `Unsupported numeric claim: $999.99` |
+| `evidence_sha256` | hex string | SHA-256 of canonical `evidence` JSON (`sort_keys`, no spaces) |
+| `output.executive_summary` | string | Prose grounded in the package |
+| `output.priority_findings[].finding_id` | `finding-N` | Must exist in the package |
+| `output.priority_findings[].evidence_ids` | string[] | `cost-N`, `metric-N`, `price-N`, `import-N`, `forecast-N`, `finding-N`; all must exist |
+| `output.priority_findings[].risk` | enum | `low` / `medium` / `high` |
+| `output.priority_findings[].assumptions` | string[] | At least one; no new numbers beyond the package |
+| `output.unknowns` | string[] | Missing context the model or fallback surfaced |
+| `output.human_review_required` | literal `true` | Enforced by the schema |
+| `evidence` | object | The exact redacted package sent or eligible to be sent |
+| `notes` / `warnings` | string[] | Whether data left the machine, synthetic-data notice, omissions |
+
+Fallback reason codes:
+
+| Code | Meaning |
+|---|---|
+| `disabled` | `CLOUDPILOT_LLM_ENABLED` is false (default); no network call |
+| `missing_api_key` | Advisor enabled but no key configured; no network call |
+| `insecure_transport` | Base URL is not HTTPS or localhost HTTP; call blocked |
+| `provider_error` | Non-retryable HTTP status or connection failure |
+| `timeout` | Request timed out after bounded retries |
+| `invalid_json` | Assistant content was not a JSON object |
+| `schema_invalid` | JSON did not match the required Pydantic schema |
+| `unknown_finding_id` | Cited a finding not present in the package |
+| `unknown_evidence_id` | Cited evidence not present in the package |
+| `unsupported_numeric_claim` | Invented decimal, currency amount, percentage, magnitude word, or integer >31 absent from the package |
+| `missing_priority_finding` | Package contained findings but the model returned none |
+| `evidence_package_too_large` | Even the fully trimmed package exceeded the configured character limit |
+| `invalid_response` / `response_too_large` | Provider payload malformed or above the byte cap |
+| `validation_failed` | Any other validation rejection |
+
+The fallback output is generated locally from the same package, always sets
+`human_review_required=true`, and states that no cloud action was taken.
 
 ---
 

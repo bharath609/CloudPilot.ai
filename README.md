@@ -47,8 +47,9 @@ will only ever explain numbers that deterministic code already computed.
 | Reproducible savings scenarios with synthetic-price disclosure | ✅ Milestone 3 |
 | Daily per-currency spend forecasts with held-out evaluation | ✅ Milestone 4 |
 | Transparent baselines (seasonal naive, moving average) and empirical intervals | ✅ Milestone 4 |
-| 66 automated tests | ✅ Milestones 1–4 |
-| Evidence-grounded AI advisor | ⏳ Milestone 5 |
+| Evidence-bounded AI advisor with typed output and strict local fallback | ✅ Milestone 5 |
+| Optional free OpenAI-compatible provider, disabled by default | ✅ Milestone 5 |
+| 111 automated tests | ✅ Milestones 1–5 |
 | React dashboard, exports, approvals | ⏳ Milestones 6–7 |
 
 ## Architecture
@@ -77,10 +78,12 @@ flowchart TD
   style G fill:#e8f5e9,stroke:#2e7d32
   style H fill:#e8f5e9,stroke:#2e7d32
   style I fill:#e8f5e9,stroke:#2e7d32
+  style J fill:#e8f5e9,stroke:#2e7d32
+  style K fill:#e8f5e9,stroke:#2e7d32
   style P fill:#e8f5e9,stroke:#2e7d32
 ```
 
-Green nodes are implemented through Milestone 4. Detailed design, decisions and
+Green nodes are implemented through Milestone 5. Detailed design, decisions and
 trade-offs: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
 ## Quick start
@@ -175,7 +178,7 @@ curl -s http://127.0.0.1:8000/api/findings
 
 Configuration lives in `.env` (copy `.env.example`). No secrets are required.
 
-## API (Milestones 1–4)
+## API (Milestones 1–5)
 
 | Method | Endpoint | Purpose |
 |---|---|---|
@@ -197,6 +200,9 @@ Configuration lives in `.env` (copy `.env.example`). No secrets are required.
 | POST | `/api/forecasts/run` | Run a deterministic daily forecast with held-out evaluation |
 | GET | `/api/forecasts` | Latest forecast run, or `?run_id=` a specific run |
 | GET | `/api/forecasts/{run_id}` | One forecast run with its daily points |
+| POST | `/api/reports/generate` | Generate an evidence-bound AI explanation, or the deterministic fallback |
+| GET | `/api/reports` | Paginated report history, newest first |
+| GET | `/api/reports/{id}` | One report with its validated output and exact evidence package |
 
 All three cost endpoints accept `start`, `end`, `currency`, `provider`,
 `account_id`, `service`, `region`, `environment` and `project`. `breakdown` adds
@@ -333,6 +339,88 @@ Example forecast response (abridged, synthetic sample data):
 The projection is reproducible from `data/sample/billing_sample.csv` with plain
 `csv` and `Decimal`; the independent re-derivation matches every stored point.
 
+### AI advisor (optional, disabled by default)
+
+`POST /api/reports/generate` builds a bounded evidence package from the newest
+analysis and forecast runs (or `analysis_run_id` / `forecast_run_id` in the body),
+optionally asks an OpenAI-compatible free-tier model to explain it, validates the
+answer, and stores the result immutably.
+
+- **No paid API is required.** The default is `CLOUDPILOT_LLM_ENABLED=false`, which
+  never opens a network connection and returns a deterministic explanation. To
+  enable a free provider, set `CLOUDPILOT_LLM_ENABLED=true`, a base URL, a model
+  and `CLOUDPILOT_LLM_API_KEY` in `.env`. Groq is the documented default; Gemini's
+  OpenAI compatibility endpoint, OpenRouter and a local Ollama work by changing
+  the same four values. The key is held as `SecretStr`, never logged, never
+  stored in the database and never placed in the request body.
+- **Only derived evidence leaves the machine.** The package contains analysis and
+  forecast metadata, finding identifiers, exact amounts, utilization metrics,
+  assumptions, price provenance and evidence IDs. It excludes raw CSV rows, tags,
+  account values and all upload bytes. Free text is control-character-stripped,
+  email/12+-digit values are masked, and instruction-like strings are replaced
+  with `[redacted untrusted text]`. Findings, strings and total package size are
+  capped (`CLOUDPILOT_LLM_MAX_PACKAGE_FINDINGS`, `..._MAX_EVIDENCE_CHARS`).
+- **Typed output, strict validation.** The model must return JSON matching the
+  guide's schema, including `human_review_required: true`. Unknown finding or
+  evidence IDs, duplicate IDs, invented decimals, currency-marked amounts,
+  percentages, magnitude words and bare integers above 31 that are absent from
+  the package are rejected. The deterministic explanation is then used instead
+  and the reason is stored.
+- **Transport safety.** HTTPS is required, or HTTP only for `localhost`,
+  `127.0.0.1` or `::1` (local Ollama). Requests have a timeout, bounded retries
+  with backoff for transient statuses, a response-size cap and JSON mode where
+  supported.
+- **Fallback reasons** are machine-readable: `disabled`, `missing_api_key`,
+  `provider_error`, `timeout`, `invalid_json`, `schema_invalid`,
+  `unknown_finding_id`, `unknown_evidence_id`, `unsupported_numeric_claim`,
+  `missing_priority_finding`, `evidence_package_too_large`,
+  `invalid_response`, `response_too_large`, `insecure_transport` and
+  `validation_failed`.
+
+Example stored report (abridged, synthetic sample data, local mock provider):
+
+```json
+{
+  "id": 2,
+  "status": "completed",
+  "mode": "llm",
+  "ai_used": true,
+  "provider": "local-mock",
+  "model": "mock-free-model",
+  "analysis_run_id": 1,
+  "forecast_run_id": 1,
+  "fallback_reason": null,
+  "validation_errors": [],
+  "evidence_sha256": "1b59a816fb88b3811961bd2a224e648d441c6d168a4517ddb0dfc8ddcb80006c",
+  "attempts": 1,
+  "latency_ms": 120,
+  "output": {
+    "executive_summary": "The stored evidence shows one priority review item.",
+    "priority_findings": [
+      {
+        "finding_id": "finding-2",
+        "explanation": "i-demo-0a1b2c3d4e60 was flagged as idle_resource with an estimated monthly saving of 138.563898 USD.",
+        "evidence_ids": ["cost-242", "cost-250"],
+        "assumptions": ["..."],
+        "risk": "medium",
+        "recommended_next_step": "Ask the owner to confirm the workload schedule."
+      }
+    ],
+    "unknowns": ["Resource ownership is not recorded."],
+    "human_review_required": true
+  },
+  "evidence": { "analysis": { "run_id": 1 }, "forecast": { "run_id": 1 } },
+  "notes": ["AI explanation accepted after schema, evidence-ID and numeric-claim validation."],
+  "warnings": ["Human review is required before any cloud change."]
+}
+```
+
+`GET /api/reports` lists reports newest first; `GET /api/reports/{id}` returns the
+stored output together with the *exact* redacted package that was eligible to
+leave the machine, so any explanation can be audited or rejected. The SHA-256 in
+`evidence_sha256` is over the canonical serialized package. The advisor never
+changes findings, totals, prices or forecasts; those remain deterministic records.
+
 Example upload response (abridged):
 
 ```json
@@ -433,7 +521,7 @@ cd backend
 Actual result on this machine (Python 3.14.7, 17 Nov 2026):
 
 ```text
-66 passed, 1 warning in 59.38s
+111 passed, 1 warning in 69.85s
 All checks passed!
 ```
 
@@ -448,7 +536,14 @@ rightsizing rules, observation minimums, missing-price behaviour, currency
 partitioning of savings, evidence links, reproducibility across runs, exact
 seasonal-naive and moving-average forecasts, held-out MAE/RMSE/bias/MAPE,
 zero-actual MAPE exclusions, empirical interval widths, insufficient-history
-rejection, scope filters, currency separation and querying older runs.
+rejection, scope filters, currency separation and querying older runs. Milestone
+5 adds disabled-by-default fallback, accepted AI output built from the real
+package, unknown finding/evidence IDs, invented amounts, percentages and
+magnitude words, missing priority findings, `human_review_required=false`,
+invalid JSON, provider errors, timeouts, missing keys, prompt-injection redaction,
+email/long-digit masking, package bounding, SHA-256 reproducibility, list/detail/
+404 behaviour, HTTPS enforcement, localhost-only HTTP, retry/backoff bounds,
+response-size caps and malformed provider payloads.
 
 ### Container path verified
 
@@ -494,6 +589,26 @@ before teardown were 1 run and 30 points. `GET /api/forecasts` returned the
 latest run, `GET /api/forecasts/1` returned the same points, and an unknown run
 returned `404`. The stack and volume were removed with `docker compose down -v`.
 
+The Milestone 5 path was verified on SQLite and PostgreSQL 16. Migration `0004`
+completed `upgrade head → downgrade base → upgrade head` on SQLite, and
+`alembic check` reported no new operations. With the advisor disabled, the same
+seeded sample returned a `fallback`/`deterministic` report with reason `disabled`,
+three priority findings and total savings USD `276.720019`. With the flag enabled
+against a **local mock OpenAI-compatible server** (no external API, no real key),
+the request reached `/v1/chat/completions` with the `Authorization` header, JSON
+mode and a 10,378-character package that contained no tag columns or sample
+email; the accepted report was `completed`/`llm` with model `mock-free-model`,
+one attempt, two evidence IDs and an unchanged `evidence_sha256`. A second mock
+that returned an invented `$999.99` claim was rejected with reason
+`unsupported_numeric_claim` and the deterministic summary was stored instead.
+On the PostgreSQL 16 Compose database, `alembic_version` was `0004`,
+`POST /api/analysis/run`, `/api/forecasts/run` and `/api/reports/generate`
+returned the same USD `276.720019` and `765.016323`, and the report's
+`evidence_sha256` was identical to the SQLite run (`1b59a816…`), so the package
+is byte-identical across engines. The stored `evidence`/`output` columns were
+JSON objects and timestamps were `timestamp with time zone`. The stack and volume
+were then removed with `docker compose down -v`.
+
 ## 5-minute demo
 
 1. Start the API and open <http://127.0.0.1:8000/docs>.
@@ -518,22 +633,31 @@ returned `404`. The stack and volume were removed with `docker compose down -v`.
    holdout days were predicted without their actual values.
 9. Re-run with `{"method":"moving_average","horizon_days":7}` and compare the
    flat forecast and its wider error metrics; both runs stay queryable.
-10. Upload `data/sample/billing_row_errors.csv`; show `status=partial` and open
+10. `POST /api/reports/generate` with `{}` while the advisor is disabled. Show the
+    `fallback`/`deterministic` report, three priority findings, the unchanged USD
+    `276.720019`, and the `disabled` reason. Open `/api/reports/1` and note that
+    the stored evidence contains no raw CSV rows or tags.
+11. Optional: set `CLOUDPILOT_LLM_ENABLED=true` plus a free provider's base URL,
+    model and key in `.env`, restart, and generate again. The report becomes
+    `completed`/`llm` only if the answer passes schema, evidence-ID and numeric
+    validation; otherwise the deterministic fallback is stored with a reason.
+12. Upload `data/sample/billing_row_errors.csv`; show `status=partial` and open
     `/api/imports/{id}/errors` to inspect the precise row/column errors.
-11. Upload `data/sample/billing_missing_column.csv`; show `status=invalid` and
+13. Upload `data/sample/billing_missing_column.csv`; show `status=invalid` and
     that `/records` is empty.
-12. Upload the billing file again; show the `409 duplicate_import` with the
+14. Upload the billing file again; show the `409 duplicate_import` with the
     original import ID. Retry with `?force=true` to see overlap warnings.
-13. Open `/api/costs/summary`: USD `1531.305850` over 480 rows for
+15. Open `/api/costs/summary`: USD `1531.305850` over 480 rows for
     `2026-01-01..2026-03-01`. The same total comes from a plain `Decimal` read of
     the CSV, not from the database path.
-14. Open `/api/costs/breakdown?dimension=service&limit=5` and
+16. Open `/api/costs/breakdown?dimension=service&limit=5` and
     `/api/costs/trends?granularity=month`; shares are percentages of one currency
     and the three monthly buckets add back to the same total.
-15. Run the tests and show the green output above.
+17. Run the tests and show the green output above.
 
-All findings, prices and forecasts in this demo are synthetic. AI explanations
-are not part of Milestones 1–4 and are not simulated.
+All findings, prices, forecasts and reports in this demo are synthetic. The
+advisor is disabled by default; when enabled it explains the computed evidence but
+never changes a total or performs a cloud action.
 
 ## Repository layout
 
@@ -545,6 +669,7 @@ CloudPilot AI/
 │   │   ├── api/{deps.py,routes/}   # health, import and cost endpoints
 │   │   ├── core/                   # settings, enums, errors, UTC helpers
 │   │   ├── db/                     # engine, exact decimal types, ORM models
+│   │   ├── llm/                    # OpenAI-compatible client + evidence-bound prompts
 │   │   ├── schemas/                # Pydantic response contracts
 │   │   └── services/
 │   │       ├── ingestion/          # CSV parser, validators, typed drafts
@@ -552,9 +677,10 @@ CloudPilot AI/
 │   │       ├── analytics.py        # Decimal aggregations + de-duplication
 │   │       ├── analysis.py         # idle/rightsize rules + evidence/scenarios
 │   │       ├── forecasting.py      # seasonal-naive / moving-average + holdout evaluation
+│   │       ├── advisor.py          # evidence package, redaction, validation, fallback
 │   │       └── prices.py           # catalogue loader, provenance, exact lookup
-│   ├── alembic/                    # migrations 0001 initial, 0002 waste detection, 0003 forecasting
-│   ├── tests/                      # 66 pytest tests
+│   ├── alembic/                    # migrations 0001–0004 (advisor reports)
+│   ├── tests/                      # 111 pytest tests
 │   └── pyproject.toml
 ├── data/
 │   ├── sample/                     # synthetic valid + malformed CSVs
@@ -586,7 +712,7 @@ CloudPilot AI/
 | ✅ **M2** | Decimal spend summaries, trends, breakdowns with currency partitioning and business-key de-duplication | Totals and groupings match hand-calculated fixtures |
 | ✅ **M3** | Idle/over-provisioned detection rules, sourced price catalogue, savings scenarios | Every finding links to evidence; every saving is reproducible |
 | ✅ **M4** | Transparent forecasting with train/test split and error metrics | Forecast reproducible and evaluated |
-| **M5** | Evidence-bounded AI advisor on a free OpenAI-compatible API (Groq default; Gemini/OpenRouter/Ollama interchangeable), typed output, injection tests | AI explains without inventing prices or changing totals |
+| ✅ **M5** | Evidence-bounded AI advisor on a free OpenAI-compatible API (Groq default; Gemini/OpenRouter/Ollama interchangeable), typed output, injection tests | AI explains without inventing prices or changing totals |
 | **M6** | React dashboard, filters, sample-data badge, approvals, exports | Full workflow in the browser |
 | **M7** | CI, release hardening, screenshots, `v1.0.0` | `docker compose up --build` demo passes from scratch |
 
@@ -598,14 +724,19 @@ Details and open questions: [`docs/IMPLEMENTATION_PLAN.md`](docs/IMPLEMENTATION_
 - Upload size, row count, encoding and numeric ranges are bounded.
 - SQL is parameterized through SQLAlchemy; filenames are reduced to a basename.
 - 12-digit account IDs are masked before storage.
-- CSV content is inert text; it is never executed. AI prompt-injection defenses
-  arrive with the advisor in Milestone 5.
+- CSV content is inert text; it is never executed. Before any optional AI call,
+  free text is control-character-stripped, emails/long digit runs are masked and
+  instruction-like strings are replaced. The model receives only a bounded,
+  redacted evidence package, not raw files.
+- The advisor is disabled by default. When enabled it requires HTTPS (HTTP only
+  on localhost), keeps the API key in memory as `SecretStr`, never logs or stores
+  it, and falls back deterministically on any provider or validation failure.
 - The API has **no authentication** and binds locally. Do not expose it to a
   network until M7 hardening lands.
 
 Full STRIDE-style analysis: [`docs/THREAT_MODEL.md`](docs/THREAT_MODEL.md).
 
-## Known limitations (Milestones 1–4)
+## Known limitations (Milestones 1–5)
 
 - Analytics are read-only and computed on demand; there is no materialized cache.
   Fine at local sample sizes, but large exports will need pre-aggregation.
@@ -651,6 +782,28 @@ Full STRIDE-style analysis: [`docs/THREAT_MODEL.md`](docs/THREAT_MODEL.md).
   (credits) is not projected as negative.
 - Only daily granularity exists. There is no FX conversion and no combined
   multi-currency projection.
+- The advisor is **disabled by default** and needs a user-supplied free provider
+  account. It was exercised against a local OpenAI-compatible mock, not against
+  each vendor's live endpoint, so provider-specific quirks (JSON mode support,
+  rate limits, model deprecations) may require configuration changes.
+- Numeric validation is deliberately conservative pattern matching, not semantic
+  proof. It can reject a legitimate sentence that mentions a number absent from
+  the package, and it cannot rule out every obfuscated claim. Evidence-ID checks
+  are exact.
+- Redaction is pattern-based (emails, long digit runs, control characters,
+  instruction-like phrasing), not full data-loss prevention. Resource IDs, project
+  names and service names are still sent when they are not obviously sensitive;
+  review the stored evidence before enabling a third-party provider.
+- When the package exceeds `CLOUDPILOT_LLM_MAX_EVIDENCE_CHARS`, lower-priority
+  findings are omitted first; the report discloses the omission and the exact
+  included package is stored.
+- Reports cover the newest analysis/forecast runs unless explicit run IDs are
+  supplied. They are immutable snapshots with no delete, approval or export
+  endpoint yet (Milestone 6).
+- The model is asked for JSON and JSON mode is requested where supported, but the
+  schema itself is enforced client-side after the response arrives. There is no
+  streaming, no token accounting and no cost/billing estimate for provider usage.
+- Prompts are English-only; explanations inherit the model's language and style.
 - SQLite is fine for one local user; PostgreSQL is recommended for concurrency.
 - The container image runs on Python 3.12 while local development used 3.14.7;
   both pass the same HTTP checks, but the test suite is executed on the host.

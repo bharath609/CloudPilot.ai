@@ -3,7 +3,7 @@
 > Status key: `DONE` · `IN PROGRESS` · `PLANNED` · `BLOCKED`
 >
 > This plan follows the milestone order in `CloudPilot_AI_Full_Guide.md` §14.
-> Milestones 1–4 are implemented. Later milestones are deliberately not started
+> Milestones 1–5 are implemented. Later milestones are deliberately not started
 > until the previous one is reviewed and approved.
 
 ## 1. Guiding constraints
@@ -260,22 +260,53 @@ and volume were removed with `docker compose down -v`.
 - Only daily granularity exists; no FX and no combined currency totals.
 - No approval workflow or export yet (Milestone 6).
 
-### Milestone 5 — AI advisor — `PLANNED`
+### Milestone 5 — AI advisor — `DONE`
 
-- Provider adapter: OpenAI-compatible client for free-tier APIs (Groq documented
-  default; Gemini, OpenRouter and local Ollama interchangeable via `.env`).
-  Optional and disabled by default; no paid API and no key committed.
-- Configuration: `CLOUDPILOT_LLM_ENABLED`, `CLOUDPILOT_LLM_BASE_URL`,
-  `CLOUDPILOT_LLM_MODEL`, `CLOUDPILOT_LLM_API_KEY`. A missing key or a disabled
-  flag falls back to the deterministic explanation.
-- Only a bounded, redacted evidence package leaves the machine; raw billing files
-  are never sent.
-- Bounded evidence package, typed JSON output, evidence-ID validation.
-- Reject numeric price/savings claims absent from the package.
-- Timeout, retry, redaction, deterministic fallback explanation.
-- Prompt-injection tests using hostile CSV text.
+| Task | Status |
+|---|---|
+| Provider-agnostic OpenAI-compatible client (stdlib `urllib`, no SDK) | DONE — `app/llm/client.py` |
+| Free-tier defaults: Groq documented; Gemini/OpenRouter/Ollama via `.env` | DONE |
+| Disabled by default with a deterministic local explanation | DONE |
+| Bounded, redacted evidence package (findings + forecast, no raw rows/tags) | DONE — `app/services/advisor.py` |
+| Typed JSON output validated with Pydantic | DONE — `app/schemas/advisor.py` |
+| Reject unknown finding/evidence IDs and absent price/savings claims | DONE |
+| HTTPS-only transport (HTTP allowed only on localhost) | DONE |
+| Timeout, bounded retries with backoff, response-size cap | DONE |
+| Prompt-injection tests using hostile free text | DONE |
+| Immutable report persistence + migration `0004` | DONE — `advisor_reports` |
+| `POST /api/reports/generate`, `GET /api/reports`, `GET /api/reports/{id}` | DONE |
+| Docs, `.env.example`, live checks on SQLite and PostgreSQL 16 | DONE |
 
 **Exit check:** AI explains findings without changing totals or inventing savings.
+Result: 111 tests pass (45 new M5 tests); `ruff` clean; migration `0004` cycles
+cleanly on SQLite and `alembic check` reports no drift. Live SQLite: disabled
+report fell back with reason `disabled`; a local mock OpenAI-compatible endpoint
+produced an accepted `completed`/`llm` report (one attempt, unchanged SHA-256);
+an invented `$999.99` claim was rejected with `unsupported_numeric_claim`. On
+PostgreSQL 16 the same flow stored JSON evidence with an identical SHA-256.
+Details in `README.md` §Tests.
+
+Decisions and limitations:
+
+- The advisor is an optional explainer, never a calculator. It receives only
+  derived evidence; deterministic services own every amount, scenario and
+  forecast. Reports cannot mutate findings.
+- The package is capped (`MAX_PACKAGE_FINDINGS`, `MAX_EVIDENCE_CHARS`) and shrinks
+  lower-priority findings, then notes/rule config, before declaring
+  `evidence_package_too_large`.
+- Redaction is pattern-based: control characters, newlines, emails, 12+-digit
+  runs and instruction-like phrases. It is not a full DLP system; resource and
+  project names that are not obviously sensitive are still sent.
+- Numeric validation is conservative. Any decimal, currency-marked amount,
+  percentage, magnitude word or bare integer above 31 must already appear in the
+  package. This rejects some legitimate phrasing by design.
+- Human review is enforced: the schema requires `human_review_required: true`,
+  and the fallback always includes explicit unknowns and a review step.
+- Reports are immutable snapshots with no delete/export/approval endpoint yet.
+  Model usage is not stored beyond attempts/latency; there is no token accounting.
+- The live provider proof used a **local mock**, not a vendor endpoint. Free-tier
+  quotas and provider-specific JSON-mode behaviour must be verified by the user
+  with their own key.
 
 ### Milestone 6 — Frontend — `PLANNED`
 
@@ -314,9 +345,11 @@ and volume were removed with `docker compose down -v`.
 | POST | `/api/forecasts/run` | Deterministic daily forecast with held-out evaluation |
 | GET | `/api/forecasts` | Latest forecast run with points (or `run_id`) |
 | GET | `/api/forecasts/{run_id}` | One forecast run with its daily points |
+| POST | `/api/reports/generate` | Evidence-bound AI report or deterministic fallback |
+| GET | `/api/reports` | Paginated report history |
+| GET | `/api/reports/{id}` | Report output + exact stored evidence package |
 
-The remaining endpoints from guide §11 (AI advisor, approvals, exports) arrive in
-their own milestones.
+The remaining endpoints from guide §11 (approvals, exports) arrive in Milestone 6.
 
 ## 4. Key risks
 
@@ -327,6 +360,7 @@ their own milestones.
 | Malformed CSV corrupting data | Structural gate + row validation + transaction | M1 |
 | CSV formula / prompt injection | Cells stored as inert text; never executed; AI prompt hardening | M1/M5 |
 | Overclaiming savings | Evidence + assumptions + confidence required on every scenario | M3 |
+| AI invents amounts or follows injected text | Bounded/redacted package, typed output, evidence-ID and numeric validation, deterministic fallback | M5 |
 | Scope creep | One milestone per review, explicit exit checks | all |
 | Synthetic data mistaken for live | `data_source` field, UI badge, README banner | M1/M6 |
 

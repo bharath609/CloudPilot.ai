@@ -10,7 +10,7 @@ from decimal import Decimal
 from functools import lru_cache
 from pathlib import Path
 
-from pydantic import Field
+from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -101,6 +101,24 @@ class Settings(BaseSettings):
     forecast_max_history_days: int = Field(default=365, ge=28, le=3650)
     forecast_warning_history_days: int = Field(default=56, ge=14)
     forecast_interval_quantile: Decimal = Field(default=Decimal("0.90"), gt=0, lt=1)
+
+    # AI advisor (Milestone 5) ---------------------------------------------
+    # Disabled by default. Only free OpenAI-compatible endpoints are supported;
+    # the API key is read from the environment and never logged or stored.
+    llm_enabled: bool = False
+    llm_provider: str = "groq"
+    llm_base_url: str = "https://api.groq.com/openai/v1"
+    llm_model: str = "llama-3.1-8b-instant"
+    llm_api_key: SecretStr = SecretStr("")
+    llm_timeout_seconds: float = Field(default=30.0, gt=0, le=120)
+    llm_max_retries: int = Field(default=2, ge=0, le=5)
+    llm_temperature: Decimal = Field(default=Decimal("0"), ge=0, le=2)
+    llm_max_output_tokens: int = Field(default=1200, ge=128, le=8000)
+    llm_json_mode: bool = True
+    llm_max_package_findings: int = Field(default=20, ge=1, le=100)
+    llm_max_priority_findings: int = Field(default=10, ge=1, le=50)
+    llm_max_evidence_chars: int = Field(default=48_000, ge=8_000, le=200_000)
+    llm_max_response_bytes: int = Field(default=200_000, ge=10_000, le=2_000_000)
 
     @property
     def cors_origin_list(self) -> list[str]:

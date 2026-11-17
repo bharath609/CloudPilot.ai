@@ -32,20 +32,20 @@ flowchart TD
   N --> O[Report export]
 ```
 
-Milestones 1–4 implement the left-hand slice plus deterministic analysis:
+Milestones 1–5 implement the left-hand slice plus deterministic analysis:
 upload → validation → normalization → persistence → cost analytics → waste
-detection and savings scenarios → spend forecasting. The AI advisor, dashboard
-and exports remain planned.
+detection and savings scenarios → spend forecasting → evidence-bound
+explanation. The dashboard, approvals and exports remain planned.
 
 ## 3. Current repository layout
 
 ```text
 CloudPilot AI/
 ├── backend/
-│   ├── alembic/                 # migrations (0001 initial, 0002 waste detection, 0003 forecasting)
+│   ├── alembic/                 # migrations 0001–0004 (advisor reports)
 │   ├── app/
 │   │   ├── main.py              # app factory, lifespan, exception handlers
-│   │   ├── api/routes/          # health, imports, costs, prices, analysis, findings, forecasts
+│   │   ├── api/routes/          # health, imports, costs, prices, analysis, forecasts, reports
 │   │   ├── core/
 │   │   │   ├── config.py        # typed settings (pydantic-settings)
 │   │   │   ├── errors.py        # AppError taxonomy + error envelope
@@ -53,10 +53,14 @@ CloudPilot AI/
 │   │   ├── db/
 │   │   │   ├── base.py          # Base, engine/session factory, get_db
 │   │   │   └── models.py        # ORM tables
+│   │   ├── llm/
+│   │   │   ├── client.py        # OpenAI-compatible stdlib client (retries, limits)
+│   │   │   └── prompts.py       # system/user prompts, required JSON shape
 │   │   ├── schemas/             # Pydantic request/response models
 │   │   ├── services/analytics.py # Decimal spend aggregation + de-duplication
 │   │   ├── services/analysis.py  # idle/rightsize rules, evidence, scenarios
 │   │   ├── services/forecasting.py # daily baselines, holdout metrics, intervals
+│   │   ├── services/advisor.py   # package, redaction, validation, fallback
 │   │   ├── services/prices.py    # catalogue loader, provenance, lookup
 │   │   ├── services/ingestion/  # csv_reader, validators, billing, utilization
 │   │   └── services/imports/    # import orchestration + queries
@@ -289,6 +293,57 @@ Guarantees:
 - **Reproducibility.** Runs and points are immutable. Repeating a request creates
   a new run with identical arithmetic; old runs remain queryable by `run_id`.
 
+### 6.4 Evidence-bound advisor path (Milestone 5)
+
+`services/advisor.py` packages deterministic results, optionally calls one
+OpenAI-compatible endpoint, validates the prose and persists the outcome. The
+default path is local-only.
+
+```text
+POST /api/reports/generate
+        |
+        v
+ latest analysis_run (findings + scenarios) --.
+ latest forecast_run (evaluation + series) ---+--> bounded package builder
+                                                   |
+                                      redact free text, cap findings/strings
+                                                   |
+                                      canonical JSON + SHA-256
+                                                   |
+                     advisor disabled? ------------+--> deterministic output
+                     no key / insecure URL? ------+
+                                                   |
+                                      HTTPS OpenAI-compatible POST
+                                                   |
+                                JSON mode, timeout, bounded retries
+                                                   |
+                              Pydantic schema -> evidence-ID check
+                                                   |
+                              numeric-claim check against package
+                                                   |
+                         accept, or discard and use deterministic output
+                                                   v
+                                 immutable advisor_reports row
+```
+
+Guarantees:
+
+- **The model cannot change numbers.** It receives a read-only package; accepted
+  prose is stored beside the package, not in findings or forecast tables.
+- **No raw data by default.** Packages exclude CSV bytes, tags, upload rows and
+  accounts. Free text is stripped of control characters, emails and long digit
+  runs, and instruction-like phrasing becomes `[redacted untrusted text]`.
+- **Strict acceptance.** Unknown or duplicate finding/evidence IDs, absent
+  numeric claims, missing priority findings, `human_review_required != true` and
+  schema violations all discard the model answer and record a reason code.
+- **Bounded transport.** HTTPS (HTTP only on localhost), 30 s default timeout,
+  bounded retries for transient statuses, a response-size cap and no streaming.
+- **Auditable snapshots.** Each report stores the exact package, its SHA-256,
+  notes, warnings, attempts and latency. `GET /api/reports/{id}` returns both the
+  output and the package a reviewer can re-check.
+- **Same package on both engines.** The sample data produced an identical
+  `evidence_sha256` on SQLite and PostgreSQL 16.
+
 ## 7. Data model
 
 ```mermaid
@@ -300,6 +355,8 @@ erDiagram
   FINDINGS ||--|| SAVINGS_SCENARIOS : "explains"
   PRICE_ENTRIES }o--o{ FINDINGS : "sources"
   FORECAST_RUNS ||--o{ FORECAST_POINTS : "projects"
+  ANALYSIS_RUNS ||--o{ ADVISOR_REPORTS : "explained by"
+  FORECAST_RUNS ||--o{ ADVISOR_REPORTS : "explained by"
 
   IMPORTS {
     int id PK
@@ -445,6 +502,27 @@ erDiagram
     decimal upper_bound
     string method
   }
+  ADVISOR_REPORTS {
+    int id PK
+    string status "completed|fallback"
+    string mode "llm|deterministic"
+    bool ai_used
+    string provider
+    string model
+    int analysis_run_id FK "nullable"
+    int forecast_run_id FK "nullable"
+    string fallback_reason
+    json validation_errors
+    string evidence_sha256
+    json evidence "bounded package"
+    json output "validated structured output"
+    json notes
+    json warnings
+    int attempts
+    int latency_ms
+    int duration_ms
+    datetime created_at
+  }
 ```
 
 The guide names the import table `billing_imports`. Because utilization files
@@ -469,6 +547,10 @@ with a `kind` column. See ADR-004.
 | ADR-012 | Rightsizing uses a catalogue price ratio | Avoids inventing a SKU price; exact `Decimal` arithmetic | Requires billing `sku` and catalogue `replacement_sku`; list prices only |
 | ADR-013 | Every price row carries provenance and an `is_synthetic` flag | Demo prices can never be mistaken for vendor quotes | Synthetic catalogue is deliberately obvious (`example.invalid`) |
 | ADR-014 | Analysis runs and findings are immutable | Savings stay auditable and reproducible | Re-running creates new rows; no in-place edit API |
+| ADR-015 | The LLM adapter uses stdlib `urllib` against one OpenAI-compatible endpoint | Zero SDK dependency, any free provider, easy to audit | No provider-specific features; JSON mode must be supported or disabled |
+| ADR-016 | Model output is strictly validated against the package, then discarded on failure | AI can explain but never invent or mutate amounts | Some legitimate prose is rejected by design; deterministic fallback always exists |
+| ADR-017 | Advisor is opt-in and off by default; only a redacted derived package can leave | Local-first default and free-tier friendly | Users must configure a key; live vendor behaviour is not pre-verified |
+| ADR-018 | Advisor reports are immutable snapshots including the exact package hash | A reviewer can reproduce or reject an explanation | No delete/approval/export yet; storage grows with report count |
 
 ## 9. Deployment
 
@@ -495,7 +577,7 @@ flowchart LR
   entries)` returning findings with evidence IDs, registered in
   `services/analysis.py`; the result schema already carries assumptions,
   warnings and provenance.
-- **New LLM provider** → adapter implementing the same typed interface, with
-  schema validation at the boundary (Milestone 5).
+- **New LLM provider** → configure an OpenAI-compatible base URL/model in `.env`;
+  the adapter, validation and fallback stay unchanged.
 - **New currency** → add to the allowlist and ensure the aggregation layer
   partitions by currency; no silent conversion.
