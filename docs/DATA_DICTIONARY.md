@@ -1,9 +1,9 @@
 # CloudPilot AI — Data Dictionary
 
-Version 1.1 — covers Milestones 1–3 (imports, cost records, utilization
-metrics, validation issues, price catalogue, analysis runs, findings and savings
-scenarios). Money fields are `decimal.Decimal` in Python and stored exactly as
-scaled integers (see §5). All timestamps are UTC.
+Version 1.2 — covers Milestones 1–4 (imports, cost records, utilization
+metrics, validation issues, price catalogue, analysis runs, findings, savings
+scenarios and forecasts). Money fields are `decimal.Decimal` in Python and
+stored exactly as scaled integers (see §5). All timestamps are UTC.
 
 ---
 
@@ -88,6 +88,8 @@ owner review.
 | `RiskLevel` | `low`, `medium`, `high` |
 | `ConfidenceLevel` | `low`, `medium`, `high` |
 | `ScenarioMethod` | `stop_resource`, `rightsize_sku` |
+| `ForecastMethod` | `seasonal_naive`, `moving_average` |
+| `ForecastGranularity` | `day` |
 | `ValidationCode` | see §6 |
 
 ---
@@ -280,6 +282,45 @@ One reproducible scenario per finding.
 | `assumptions` | JSON | same assumptions shown on the finding |
 | `created_at` | timestamptz | |
 
+### 4.9 `forecast_runs`
+
+One immutable record per `POST /api/forecasts/run`.
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | integer PK | |
+| `status` | text(16) | `completed` |
+| `method` | enum text | `seasonal_naive` / `moving_average` |
+| `granularity` | enum text | `day` |
+| `reference_date` | date | Latest de-duplicated billing date in scope |
+| `history_start` / `history_end` | date | History actually used (≤ 365 days) |
+| `horizon_start` / `horizon_end` | date | Inclusive projected window |
+| `currency` | char(3), nullable | Set only when the request scoped one currency |
+| `filters` | JSON | Applied scope fields |
+| `config` | JSON | Horizon, holdout, method, window, quantile, minimums, business key |
+| `series_count` | integer | Currencies successfully forecast |
+| `evaluation` | JSON | Per-currency metrics and notes, keyed by ISO currency |
+| `stats` | JSON | Row counts, duplicate exclusions, skipped series, sample flag |
+| `notes` / `warnings` | JSON | Explicit assumptions and limitations |
+| `duration_ms` | integer | Wall-clock runtime |
+| `created_at` / `completed_at` | timestamptz | |
+
+### 4.10 `forecast_points`
+
+One predicted day per currency per run.
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | integer PK | |
+| `run_id` | FK → `forecast_runs.id` | `ON DELETE CASCADE` |
+| `currency` | char(3) | Series currency; never merged |
+| `period` | date | One calendar day |
+| `predicted_cost` | decimal(20,6) | Point forecast, clamped at zero |
+| `lower_bound` | decimal(20,6) | Predicted − empirical interval width, clamped at zero |
+| `upper_bound` | decimal(20,6) | Predicted + interval width |
+| `method` | enum text | Copied from the run |
+| `created_at` | timestamptz | |
+
 ---
 
 ## 5. Exact money storage (ADR-002)
@@ -300,6 +341,7 @@ value  = Decimal(stored) × 10^-scale  # int → Decimal, exact
 | `resource_metrics.*_pct` | 3 | 3 dp |
 | `price_entries.unit_price` | 6 | 6 dp, positive |
 | `findings.*_cost`, `savings_scenarios.*_cost` | 6 | 6 dp |
+| `forecast_points.predicted_cost`, `lower_bound`, `upper_bound` | 6 | 6 dp |
 | `findings.savings_pct` | 3 | 3 dp |
 
 Consequences:
@@ -379,6 +421,48 @@ savings  = baseline − proposed
 Both prices must have the same `provider`, `region`, `currency` and `usage_unit`,
 and both must be effective on the cost-window end date. If either is missing, no
 finding is produced and the run reports the skip. No fallback price is guessed.
+
+### 5.3 Forecast response fields (Milestone 4)
+
+| Field | Type | Meaning |
+|---|---|---|
+| `run.reference_date` | ISO date | Latest de-duplicated billing date in scope |
+| `run.history_start` / `history_end` | ISO date | History actually used, capped at `forecast_max_history_days` |
+| `run.horizon_start` / `horizon_end` | ISO date | Inclusive projected window |
+| `run.config` | object | Method, horizon, holdout, window, season length, quantile, minimums, business key |
+| `run.evaluation` | object | Per-currency metrics, keyed by currency |
+| `run.stats.skipped` | object | Currency → reason (`insufficient_history`, `holdout_too_long`, …) |
+| `run.stats.daily_groups` / `stored_cost_rows` | integer | Grouped currency-days used / de-duplicated billing rows in scope |
+| `run.stats.duplicate_rows_excluded` | integer | Stored rows skipped by the business key |
+| `series[].history_days` | integer | Calendar days in history, including zero-spend gaps |
+| `series[].projected_total` | decimal string | Exact sum of daily point forecasts for that currency |
+| `series[].projected_lower` / `upper` | decimal string | Exact sums of daily bounds, not a simultaneous interval |
+| `evaluation.mae` / `rmse` | decimal string | Held-out error, same currency units |
+| `evaluation.bias` | decimal string | Mean signed error (actual − predicted); negative means over-forecast |
+| `evaluation.mape_pct` | decimal string or null | Mean absolute percentage error, 3 dp; excludes zero actuals |
+| `evaluation.mape_excluded_points` | integer | Holdout days excluded from MAPE because actual spend was zero |
+| `evaluation.interval_quantile` | decimal string | Residual quantile used (default `0.90`) |
+| `evaluation.interval_width` | decimal string | Empirical absolute-residual width applied to each day |
+| `evaluation.confidence` | enum | `high` / `medium` / `low` by history length and MAPE |
+| `evaluation.warnings` | string[] | Short history/holdout, MAPE unavailable, degenerate interval, horizon > holdout, flat average |
+| `points[].period` | ISO date | One calendar day |
+| `points[].predicted_cost` | decimal string | Clamped at zero |
+| `points[].lower_bound` / `upper_bound` | decimal string | Predicted ± width, lower clamped at zero |
+
+Forecast arithmetic:
+
+```
+seasonal_naive: forecast[d] = actual[d - 7] (recursively for d beyond the last actual)
+moving_average: forecast[d] = mean(last N actual days)  (flat)
+MAE  = mean(|actual - predicted|) over the holdout
+RMSE = sqrt(mean((actual - predicted)^2)) over the holdout
+bias = mean(actual - predicted) over the holdout
+MAPE = mean(|actual - predicted| / actual) × 100, excluding actual = 0
+width = empirical q-quantile of |actual - predicted| over the holdout
+```
+
+No FX is applied. Each currency is forecast and totalled separately; the response
+contains no combined total.
 
 ---
 

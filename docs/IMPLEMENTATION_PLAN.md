@@ -3,7 +3,7 @@
 > Status key: `DONE` · `IN PROGRESS` · `PLANNED` · `BLOCKED`
 >
 > This plan follows the milestone order in `CloudPilot_AI_Full_Guide.md` §14.
-> Milestones 1–3 are implemented. Later milestones are deliberately not started
+> Milestones 1–4 are implemented. Later milestones are deliberately not started
 > until the previous one is reviewed and approved.
 
 ## 1. Guiding constraints
@@ -182,13 +182,83 @@ stack and volume were removed with `docker compose down -v`.
   applied.
 - No approval workflow or export yet (Milestone 6).
 
-### Milestone 4 — Forecasting — `PLANNED`
+### Milestone 4 — Forecasting — `DONE`
 
-- Transparent baseline first (seasonal naive / moving average).
-- Train/test split, MAE/MAPE, prediction intervals where defensible.
-- Explicit small-sample warnings.
+Decisions taken before implementation:
+
+| Decision | Choice |
+|---|---|
+| Granularity | Daily, per ISO currency; no combined multi-currency total |
+| Default method | `seasonal_naive` with a 7-day season; `moving_average` as the alternative |
+| Default horizon | 30 days (request range 1–90) |
+| Evaluation | Chronological 14-day holdout (request range 1–60), predicted strictly from earlier data |
+| Minimum history | 28 days, inclusive of the holdout; maximum 365 days retained |
+| Missing days | Calendar days without billing rows count as zero spend |
+| Prediction interval | Empirical 90% quantile of absolute holdout residuals, applied symmetrically and clamped at zero |
+| Metrics | MAE, RMSE, signed bias, MAPE excluding zero-actual days, interval width, `mape_excluded_points` |
+| Confidence | `high` ≥90 days and MAPE ≤15%; `medium` ≥42 days and MAPE ≤30%; otherwise `low` |
+| Warnings | Short history (<56 days), short holdout (<14 days), unavailable MAPE, degenerate interval, horizon > holdout, flat moving-average forecast |
+| Persistence | Immutable `forecast_runs` + `forecast_points`; migration `0003` |
+
+| Task | Status |
+|---|---|
+| `ForecastMethod` / `ForecastGranularity` enums and forecast settings | DONE |
+| `ForecastRun` / `ForecastPoint` tables + migration `0003` | DONE |
+| De-duplicated daily spend per currency, zero-filled calendar days | DONE |
+| Seasonal-naive and moving-average baselines | DONE |
+| Held-out evaluation with MAE/RMSE/bias/MAPE and explicit exclusions | DONE |
+| Empirical prediction intervals and confidence/warning rules | DONE |
+| `POST /api/forecasts/run`, `GET /api/forecasts`, `GET /api/forecasts/{run_id}` | DONE |
+| Tests with hand-derived metrics, zero-holdout, insufficient history, filters, currencies, reproducibility | DONE |
 
 **Exit check:** forecast reproducible and evaluated on held-out periods.
+
+Result: 66 tests pass; lint clean. Migration `0003` passed
+`upgrade head -> downgrade base -> upgrade head` on SQLite. On the synthetic
+sample, `POST /api/forecasts/run` with the default 30-day seasonal-naive request
+returned one USD series over history `2026-01-01..2026-03-01` and horizon
+`2026-03-02..2026-03-31`:
+
+| Value | Result |
+|---|---|
+| Projected total | USD `765.016323` |
+| Projected interval | `752.864703..777.167943` |
+| MAE | `0.183786` |
+| RMSE | `0.232832` |
+| Bias | `-0.026085` |
+| MAPE | `0.720%` (0 excluded points) |
+| Interval width | `0.405054` |
+| Confidence | `medium` |
+
+The model was trained on the first 46 days and scored on the final 14, which it
+never saw. A separate script re-read `data/sample/billing_sample.csv` with plain
+`csv` and `Decimal`, rebuilt the seasonal-naive holdout and future forecasts, and
+matched all 30 stored daily points and every metric exactly; mismatches were
+`none`. A `moving_average` run produced a flat 7-day projection of USD
+`178.504515` with width `0.317761`, and both runs remained queryable.
+
+The same request was verified on PostgreSQL 16 in Docker Compose. The rebuilt
+image advanced `alembic_version` to `0003`; the seed script loaded the same
+samples; and the API returned byte-identical 30 daily points and metrics.
+`forecast_points` stores `predicted_cost`, `lower_bound` and `upper_bound` as
+`bigint` micro-units. Counts before teardown were 1 run and 30 points. The stack
+and volume were removed with `docker compose down -v`.
+
+**Known limitations carried into Milestone 5**
+
+- The models are deliberately simple baselines, not regression/ARIMA/exponential
+  smoothing. There is no trend, holiday calendar or exogenous driver.
+- A 14-day holdout yields a noisy error estimate; a 90% empirical interval from
+  14 residuals projected over 30 days is indicative, not calibrated.
+- Calendar gaps are zero spend. Late or restated exports can change the history
+  and therefore future forecasts; runs are snapshots.
+- Confidence is a deterministic rule, not a probability.
+- MAPE is undefined when every holdout actual is zero and excludes zero-actual
+  days otherwise.
+- Forecast values are clamped at zero, so negative net-spend days are not
+  projected.
+- Only daily granularity exists; no FX and no combined currency totals.
+- No approval workflow or export yet (Milestone 6).
 
 ### Milestone 5 — AI advisor — `PLANNED`
 
@@ -241,9 +311,12 @@ stack and volume were removed with `docker compose down -v`.
 | GET | `/api/findings/{id}` | Finding detail, evidence and savings scenario |
 | GET | `/api/prices` | Sourced catalogue prices with provenance |
 | GET | `/api/prices/{id}` | One price entry and its source |
+| POST | `/api/forecasts/run` | Deterministic daily forecast with held-out evaluation |
+| GET | `/api/forecasts` | Latest forecast run with points (or `run_id`) |
+| GET | `/api/forecasts/{run_id}` | One forecast run with its daily points |
 
-The remaining endpoints from guide §11 (forecast, AI advisor, approvals, exports)
-arrive in their own milestones.
+The remaining endpoints from guide §11 (AI advisor, approvals, exports) arrive in
+their own milestones.
 
 ## 4. Key risks
 

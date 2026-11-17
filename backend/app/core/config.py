@@ -92,6 +92,16 @@ class Settings(BaseSettings):
     # Price catalogue -------------------------------------------------------
     price_catalogue_path: str = "pricing/catalogue/demo_prices.csv"
 
+    # Forecasting -----------------------------------------------------------
+    forecast_horizon_days: int = Field(default=30, ge=1, le=90)
+    forecast_holdout_days: int = Field(default=14, ge=1, le=60)
+    forecast_moving_average_days: int = Field(default=7, ge=1, le=60)
+    forecast_season_length_days: int = Field(default=7, ge=2, le=30)
+    forecast_min_history_days: int = Field(default=28, ge=14, le=366)
+    forecast_max_history_days: int = Field(default=365, ge=28, le=3650)
+    forecast_warning_history_days: int = Field(default=56, ge=14)
+    forecast_interval_quantile: Decimal = Field(default=Decimal("0.90"), gt=0, lt=1)
+
     @property
     def cors_origin_list(self) -> list[str]:
         return [item.strip() for item in self.cors_origins.split(",") if item.strip()]

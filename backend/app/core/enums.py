@@ -81,5 +81,16 @@ class ScenarioMethod(StrEnum):
     RIGHTSIZE_SKU = "rightsize_sku"
 
 
+class ForecastMethod(StrEnum):
+    """Transparent, deterministic baseline models only."""
+
+    SEASONAL_NAIVE = "seasonal_naive"
+    MOVING_AVERAGE = "moving_average"
+
+
+class ForecastGranularity(StrEnum):
+    DAY = "day"
+
+
 PROVIDERS = frozenset(provider.value for provider in Provider)
 ENVIRONMENTS = frozenset(environment.value for environment in Environment)

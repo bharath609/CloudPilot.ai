@@ -4,12 +4,13 @@
 
 CloudPilot AI ingests cloud billing and utilization exports, validates them with
 row-level precision, stores exact-decimal records, and turns them into spend
-analytics, evidence-backed waste findings and reproducible savings scenarios.
-Forecasting, the AI advisor and the approval workflow arrive in later milestones.
+analytics, evidence-backed waste findings, reproducible savings scenarios and
+transparent spend forecasts. The AI advisor and the approval workflow arrive in
+later milestones.
 
-> **Status: Milestones 1–3 (ingestion, cost analytics and waste detection) are
-> complete.** Forecasting, the AI advisor and the dashboard are intentionally not
-> built yet — see [Roadmap](#roadmap).
+> **Status: Milestones 1–4 (ingestion, cost analytics, waste detection and
+> forecasting) are complete.** The AI advisor, dashboard and approvals are
+> intentionally not built yet — see [Roadmap](#roadmap).
 >
 > **All sample data and demo prices are synthetic.** The application holds no
 > cloud credentials and cannot create, resize, stop or delete any cloud resource.
@@ -44,8 +45,9 @@ will only ever explain numbers that deterministic code already computed.
 | Rightsizing using sourced catalogue prices and explicit SKUs | ✅ Milestone 3 |
 | Evidence-linked findings, assumptions, warnings, confidence and risk | ✅ Milestone 3 |
 | Reproducible savings scenarios with synthetic-price disclosure | ✅ Milestone 3 |
-| 58 automated tests | ✅ Milestones 1–3 |
-| Forecasts with evaluation | ⏳ Milestone 4 |
+| Daily per-currency spend forecasts with held-out evaluation | ✅ Milestone 4 |
+| Transparent baselines (seasonal naive, moving average) and empirical intervals | ✅ Milestone 4 |
+| 66 automated tests | ✅ Milestones 1–4 |
 | Evidence-grounded AI advisor | ⏳ Milestone 5 |
 | React dashboard, exports, approvals | ⏳ Milestones 6–7 |
 
@@ -74,10 +76,11 @@ flowchart TD
   style F fill:#e8f5e9,stroke:#2e7d32
   style G fill:#e8f5e9,stroke:#2e7d32
   style H fill:#e8f5e9,stroke:#2e7d32
+  style I fill:#e8f5e9,stroke:#2e7d32
   style P fill:#e8f5e9,stroke:#2e7d32
 ```
 
-Green nodes are implemented through Milestone 3. Detailed design, decisions and
+Green nodes are implemented through Milestone 4. Detailed design, decisions and
 trade-offs: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
 ## Quick start
@@ -172,7 +175,7 @@ curl -s http://127.0.0.1:8000/api/findings
 
 Configuration lives in `.env` (copy `.env.example`). No secrets are required.
 
-## API (Milestones 1–3)
+## API (Milestones 1–4)
 
 | Method | Endpoint | Purpose |
 |---|---|---|
@@ -191,6 +194,9 @@ Configuration lives in `.env` (copy `.env.example`). No secrets are required.
 | POST | `/api/analysis/run` | Run deterministic waste detection (optional scope body) |
 | GET | `/api/findings` | Findings from the latest run, or `?run_id=` a specific run |
 | GET | `/api/findings/{id}` | Finding detail, evidence and stored scenario |
+| POST | `/api/forecasts/run` | Run a deterministic daily forecast with held-out evaluation |
+| GET | `/api/forecasts` | Latest forecast run, or `?run_id=` a specific run |
+| GET | `/api/forecasts/{run_id}` | One forecast run with its daily points |
 
 All three cost endpoints accept `start`, `end`, `currency`, `provider`,
 `account_id`, `service`, `region`, `environment` and `project`. `breakdown` adds
@@ -270,6 +276,63 @@ The full run is reproducible from the sample CSVs with `Decimal` arithmetic;
 `docs/IMPLEMENTATION_PLAN.md` records the independent calculation. The demo
 catalogue uses `example.invalid` URLs and is never presented as a vendor quote.
 
+`POST /api/forecasts/run` accepts an optional body with `horizon_days` (1–90,
+default 30), `holdout_days` (1–60, default 14), `method` (`seasonal_naive` or
+`moving_average`), `moving_average_days` and the same scope fields as analytics.
+Daily spend is de-duplicated billing grouped by currency; calendar days with no
+billing rows count as zero. The held-out tail is predicted without using its
+actual values, and every response carries MAE, RMSE, signed bias, MAPE (with
+zero-actual exclusions disclosed), an empirical prediction interval, confidence
+and warnings. There is no AI, no cloud call and no combined multi-currency total.
+
+Example forecast response (abridged, synthetic sample data):
+
+```json
+{
+  "run": {
+    "id": 1,
+    "status": "completed",
+    "method": "seasonal_naive",
+    "granularity": "day",
+    "reference_date": "2026-03-01",
+    "history_start": "2026-01-01",
+    "history_end": "2026-03-01",
+    "horizon_start": "2026-03-02",
+    "horizon_end": "2026-03-31",
+    "series_count": 1,
+    "notes": ["Forecasts are deterministic statistical baselines; no AI or cloud API is used."],
+    "warnings": ["A statistical baseline can be wrong; use the held-out error metrics and interval."]
+  },
+  "series": [
+    {
+      "currency": "USD",
+      "history_days": 60,
+      "projected_total": "765.016323",
+      "projected_lower": "752.864703",
+      "projected_upper": "777.167943",
+      "evaluation": {
+        "method": "seasonal_naive",
+        "train_days": 46,
+        "holdout_days": 14,
+        "mae": "0.183786",
+        "rmse": "0.232832",
+        "bias": "-0.026085",
+        "mape_pct": "0.720",
+        "interval_quantile": "0.90",
+        "interval_width": "0.405054",
+        "confidence": "medium"
+      },
+      "points": [
+        { "period": "2026-03-02", "predicted_cost": "25.659867", "lower_bound": "25.254813", "upper_bound": "26.064921" }
+      ]
+    }
+  ]
+}
+```
+
+The projection is reproducible from `data/sample/billing_sample.csv` with plain
+`csv` and `Decimal`; the independent re-derivation matches every stored point.
+
 Example upload response (abridged):
 
 ```json
@@ -344,6 +407,12 @@ retained in raw row data but ignored by analysis.
    Missing SKUs or prices produce no finding and are disclosed. Low utilization is
    a review signal, not proof of waste. Synthetic prices are flagged on the
    finding and the run.
+7. **Forecasts are evaluated, not asserted.** The model is fitted only on the
+   training portion of history and scored on a held-out tail that it never saw.
+   Error metrics, the empirical interval, history length, exclusions and every
+   warning are returned and stored. A forecast with insufficient history is
+   rejected rather than silently extrapolated. Each currency is forecast and
+   totalled separately; projected USD and EUR values are never added.
 
 | Situation | Persisted | Status |
 |---|---|---|
@@ -364,7 +433,7 @@ cd backend
 Actual result on this machine (Python 3.14.7, 17 Nov 2026):
 
 ```text
-58 passed, 1 warning in 34.07s
+66 passed, 1 warning in 59.38s
 All checks passed!
 ```
 
@@ -376,7 +445,10 @@ account masking, strict mode, pagination, transaction integrity,
 hand-calculated analytics totals with per-currency shares and de-duplication,
 catalogue idempotence and provenance, optional SKU ingestion, idle and
 rightsizing rules, observation minimums, missing-price behaviour, currency
-partitioning of savings, evidence links, and reproducibility across runs.
+partitioning of savings, evidence links, reproducibility across runs, exact
+seasonal-naive and moving-average forecasts, held-out MAE/RMSE/bias/MAPE,
+zero-actual MAPE exclusions, empirical interval widths, insufficient-history
+rejection, scope filters, currency separation and querying older runs.
 
 ### Container path verified
 
@@ -406,6 +478,22 @@ run 1 stayed queryable by `run_id`. Row counts after teardown confirmed 2 runs,
 6 findings and 6 scenarios. The stack and its PostgreSQL volume were then
 removed with `docker compose down -v`.
 
+The Milestone 4 path was verified on both engines. On SQLite, migration `0003`
+was applied, then `alembic downgrade base` and `upgrade head` both completed
+cleanly. Seeding the synthetic samples and calling `POST /api/forecasts/run`
+(30-day horizon, 14-day holdout, seasonal naive) returned USD history
+`2026-01-01..2026-03-01`, horizon `2026-03-02..2026-03-31`, projected total
+`765.016323` (interval `752.864703..777.167943`), MAE `0.183786`, RMSE
+`0.232832`, bias `-0.026085`, MAPE `0.720%`, interval width `0.405054` and
+`medium` confidence. A separate script re-read the CSV with plain `csv` and
+`Decimal` and matched all 30 daily points and every metric exactly. On the
+PostgreSQL 16 Compose stack, the image rebuilt, `alembic_version` was `0003`,
+`forecast_points` stored `predicted_cost`, `lower_bound` and `upper_bound` as
+`bigint`, and the same request returned byte-identical daily points. Counts
+before teardown were 1 run and 30 points. `GET /api/forecasts` returned the
+latest run, `GET /api/forecasts/1` returned the same points, and an unknown run
+returned `404`. The stack and volume were removed with `docker compose down -v`.
+
 ## 5-minute demo
 
 1. Start the API and open <http://127.0.0.1:8000/docs>.
@@ -424,22 +512,28 @@ removed with `docker compose down -v`.
    assume a full-window stop.
 7. Run the analysis again and compare: a new immutable run has identical
    arithmetic, while `GET /api/findings?run_id=1` still returns the first run.
-8. Upload `data/sample/billing_row_errors.csv`; show `status=partial` and open
-   `/api/imports/{id}/errors` to inspect the precise row/column errors.
-9. Upload `data/sample/billing_missing_column.csv`; show `status=invalid` and
-   that `/records` is empty.
-10. Upload the billing file again; show the `409 duplicate_import` with the
+8. `POST /api/forecasts/run` with `{}`. The sample returns one USD series over
+   `2026-03-02..2026-03-31` with projected spend `765.016323`, plus MAE, RMSE,
+   bias, MAPE, an empirical interval and `medium` confidence. Note that all 14
+   holdout days were predicted without their actual values.
+9. Re-run with `{"method":"moving_average","horizon_days":7}` and compare the
+   flat forecast and its wider error metrics; both runs stay queryable.
+10. Upload `data/sample/billing_row_errors.csv`; show `status=partial` and open
+    `/api/imports/{id}/errors` to inspect the precise row/column errors.
+11. Upload `data/sample/billing_missing_column.csv`; show `status=invalid` and
+    that `/records` is empty.
+12. Upload the billing file again; show the `409 duplicate_import` with the
     original import ID. Retry with `?force=true` to see overlap warnings.
-11. Open `/api/costs/summary`: USD `1531.305850` over 480 rows for
+13. Open `/api/costs/summary`: USD `1531.305850` over 480 rows for
     `2026-01-01..2026-03-01`. The same total comes from a plain `Decimal` read of
     the CSV, not from the database path.
-12. Open `/api/costs/breakdown?dimension=service&limit=5` and
+14. Open `/api/costs/breakdown?dimension=service&limit=5` and
     `/api/costs/trends?granularity=month`; shares are percentages of one currency
     and the three monthly buckets add back to the same total.
-13. Run the tests and show the green output above.
+15. Run the tests and show the green output above.
 
-All findings and prices in this demo are synthetic. Forecasts and AI explanations
-are not part of Milestones 1–3 and are not simulated.
+All findings, prices and forecasts in this demo are synthetic. AI explanations
+are not part of Milestones 1–4 and are not simulated.
 
 ## Repository layout
 
@@ -457,9 +551,10 @@ CloudPilot AI/
 │   │       ├── imports/            # transaction orchestration + lookups
 │   │       ├── analytics.py        # Decimal aggregations + de-duplication
 │   │       ├── analysis.py         # idle/rightsize rules + evidence/scenarios
+│   │       ├── forecasting.py      # seasonal-naive / moving-average + holdout evaluation
 │   │       └── prices.py           # catalogue loader, provenance, exact lookup
-│   ├── alembic/                    # migrations 0001 initial, 0002 waste detection
-│   ├── tests/                      # 58 pytest tests
+│   ├── alembic/                    # migrations 0001 initial, 0002 waste detection, 0003 forecasting
+│   ├── tests/                      # 66 pytest tests
 │   └── pyproject.toml
 ├── data/
 │   ├── sample/                     # synthetic valid + malformed CSVs
@@ -490,7 +585,7 @@ CloudPilot AI/
 | ✅ **M1** | Ingestion, validation, exact-decimal storage, import audit | Totals exact; malformed rows reported precisely |
 | ✅ **M2** | Decimal spend summaries, trends, breakdowns with currency partitioning and business-key de-duplication | Totals and groupings match hand-calculated fixtures |
 | ✅ **M3** | Idle/over-provisioned detection rules, sourced price catalogue, savings scenarios | Every finding links to evidence; every saving is reproducible |
-| **M4** | Transparent forecasting with train/test split and error metrics | Forecast reproducible and evaluated |
+| ✅ **M4** | Transparent forecasting with train/test split and error metrics | Forecast reproducible and evaluated |
 | **M5** | Evidence-bounded AI advisor on a free OpenAI-compatible API (Groq default; Gemini/OpenRouter/Ollama interchangeable), typed output, injection tests | AI explains without inventing prices or changing totals |
 | **M6** | React dashboard, filters, sample-data badge, approvals, exports | Full workflow in the browser |
 | **M7** | CI, release hardening, screenshots, `v1.0.0` | `docker compose up --build` demo passes from scratch |
@@ -510,7 +605,7 @@ Details and open questions: [`docs/IMPLEMENTATION_PLAN.md`](docs/IMPLEMENTATION_
 
 Full STRIDE-style analysis: [`docs/THREAT_MODEL.md`](docs/THREAT_MODEL.md).
 
-## Known limitations (Milestones 1–3)
+## Known limitations (Milestones 1–4)
 
 - Analytics are read-only and computed on demand; there is no materialized cache.
   Fine at local sample sizes, but large exports will need pre-aggregation.
@@ -540,6 +635,22 @@ Full STRIDE-style analysis: [`docs/THREAT_MODEL.md`](docs/THREAT_MODEL.md).
   evaluated. Missing SKUs/prices produce no finding and are disclosed.
 - Findings are immutable audit records; there is no edit, acknowledge or approval
   endpoint yet (Milestone 6).
+- Forecasts are deliberately simple baselines: seasonal naive and moving average.
+  There is no regression, ARIMA, holiday calendar, growth trend or exogenous
+  driver, so structural changes in spend are not anticipated.
+- The default 14-day holdout is short. A 90% empirical interval built from 14
+  residuals, projected over 30 days, is indicative rather than calibrated. This
+  is disclosed in every response.
+- Missing calendar days are treated as zero spend. A late-arriving or restated
+  export can therefore change history and the forecast; runs are snapshots, not
+  versioned restatements.
+- Confidence is a fixed rule over history length and MAPE, not a probability.
+  MAPE excludes zero-actual days and is unavailable when every holdout actual is
+  zero.
+- Forecast points are clamped at zero; a genuinely negative net-spend day
+  (credits) is not projected as negative.
+- Only daily granularity exists. There is no FX conversion and no combined
+  multi-currency projection.
 - SQLite is fine for one local user; PostgreSQL is recommended for concurrency.
 - The container image runs on Python 3.12 while local development used 3.14.7;
   both pass the same HTTP checks, but the test suite is executed on the host.

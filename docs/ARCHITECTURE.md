@@ -32,20 +32,20 @@ flowchart TD
   N --> O[Report export]
 ```
 
-Milestones 1–3 implement the left-hand slice plus deterministic analysis:
+Milestones 1–4 implement the left-hand slice plus deterministic analysis:
 upload → validation → normalization → persistence → cost analytics → waste
-detection and savings scenarios. Forecasting, the AI advisor, the dashboard and
-exports remain planned.
+detection and savings scenarios → spend forecasting. The AI advisor, dashboard
+and exports remain planned.
 
 ## 3. Current repository layout
 
 ```text
 CloudPilot AI/
 ├── backend/
-│   ├── alembic/                 # migrations (0001 initial, 0002 waste detection)
+│   ├── alembic/                 # migrations (0001 initial, 0002 waste detection, 0003 forecasting)
 │   ├── app/
 │   │   ├── main.py              # app factory, lifespan, exception handlers
-│   │   ├── api/routes/          # health, imports, costs, prices, analysis, findings
+│   │   ├── api/routes/          # health, imports, costs, prices, analysis, findings, forecasts
 │   │   ├── core/
 │   │   │   ├── config.py        # typed settings (pydantic-settings)
 │   │   │   ├── errors.py        # AppError taxonomy + error envelope
@@ -56,6 +56,7 @@ CloudPilot AI/
 │   │   ├── schemas/             # Pydantic request/response models
 │   │   ├── services/analytics.py # Decimal spend aggregation + de-duplication
 │   │   ├── services/analysis.py  # idle/rightsize rules, evidence, scenarios
+│   │   ├── services/forecasting.py # daily baselines, holdout metrics, intervals
 │   │   ├── services/prices.py    # catalogue loader, provenance, lookup
 │   │   ├── services/ingestion/  # csv_reader, validators, billing, utilization
 │   │   └── services/imports/    # import orchestration + queries
@@ -75,9 +76,9 @@ CloudPilot AI/
 └── README.md
 ```
 
-The guide's suggested `services/forecasting`, `recommendations` and LLM packages
-are intentionally **not** created yet. Empty scaffolding suggests functionality
-that does not exist; each is added with its milestone.
+The guide's suggested `recommendations` and LLM packages are intentionally **not**
+created yet. Empty scaffolding suggests functionality that does not exist; each
+is added with its milestone. `services/forecasting.py` was added with Milestone 4.
 
 ## 4. Request flow: CSV import
 
@@ -133,6 +134,7 @@ file (422), oversized file (413) and exact duplicate (409).
 | `services/imports` | Orchestration, transaction boundary, audit | parse CSV syntax |
 | `services/analytics` | Read-only Decimal aggregation, de-duplication | mutate data or call an LLM |
 | `services/analysis` | Deterministic rules, evidence, savings scenarios | invent SKUs, prices or savings; call an LLM |
+| `services/forecasting` | Deterministic daily baselines, holdout evaluation, intervals | invent history, mix currencies, call an LLM |
 | `services/prices` | Catalogue validation, provenance, exact lookup | fetch live provider prices or guess a fallback |
 | `db` | Persistence, exact types | know about HTTP |
 | `llm` (M5) | Explanation only | calculate or mutate data |
@@ -241,6 +243,52 @@ Rules and guarantees:
 - **Synthetic provenance.** A finding that used a synthetic catalogue entry sets
   `uses_synthetic_prices=true` and includes a warning. The run is flagged too.
 
+### 6.3 Spend forecasting path (Milestone 4)
+
+`services/forecasting.py` is a deterministic, read-only model over de-duplicated
+billing. It never calls an AI or cloud API.
+
+```text
+POST /api/forecasts/run
+        |
+        v
+scope filters -> business-key de-duplication -> daily SUM(micros) per currency
+        |                                              |
+        |                                    zero-fill missing calendar days
+        v                                              v
+  max usage_date (reference)              train = history - holdout
+        |                                              |
+        |                          seasonal naive or moving average
+        |                                              |
+        |                          holdout predictions (no future leakage)
+        |                                              v
+        |                    MAE, RMSE, bias, MAPE, empirical residual quantile
+        v                                              |
+  horizon = reference + 1 .. + N                        v
+        |                              forecast_points + immutable forecast_run
+        v
+  projected total/lower/upper per currency, warnings, notes, confidence
+```
+
+Guarantees:
+
+- **No leakage.** The holdout tail is predicted from earlier values only; the
+  model is then refitted on all history for the future horizon.
+- **Seasonal naive.** Each future day equals the same weekday seven days earlier,
+  recursively for horizons beyond seven days.
+- **Moving average.** A flat mean of the last *N* observed days; the response
+  warns that weekly seasonality is not modelled.
+- **Empirical interval.** Width is the configured quantile (default 90%) of
+  absolute holdout residuals. It is not a calibrated Gaussian interval, and the
+  warning list says so when the horizon exceeds the holdout.
+- **Explicit failure.** Fewer than 28 days, a holdout that consumes all history,
+  or no matching billing rows returns `409` with a machine-readable reason
+  instead of a guessed forecast.
+- **Currency isolation.** Every series, projection and total is per currency;
+  there is no combined total and no FX.
+- **Reproducibility.** Runs and points are immutable. Repeating a request creates
+  a new run with identical arithmetic; old runs remain queryable by `run_id`.
+
 ## 7. Data model
 
 ```mermaid
@@ -251,6 +299,7 @@ erDiagram
   ANALYSIS_RUNS ||--o{ FINDINGS : "produces"
   FINDINGS ||--|| SAVINGS_SCENARIOS : "explains"
   PRICE_ENTRIES }o--o{ FINDINGS : "sources"
+  FORECAST_RUNS ||--o{ FORECAST_POINTS : "projects"
 
   IMPORTS {
     int id PK
@@ -366,6 +415,35 @@ erDiagram
     decimal proposed_monthly_cost
     decimal estimated_monthly_savings
     json assumptions
+  }
+  FORECAST_RUNS {
+    int id PK
+    string status
+    string method
+    string granularity
+    date reference_date
+    date history_start
+    date history_end
+    date horizon_start
+    date horizon_end
+    string currency
+    json filters
+    json config
+    int series_count
+    json evaluation
+    json stats
+    json notes
+    json warnings
+  }
+  FORECAST_POINTS {
+    int id PK
+    int run_id FK
+    string currency
+    date period
+    decimal predicted_cost
+    decimal lower_bound
+    decimal upper_bound
+    string method
   }
 ```
 

@@ -1,4 +1,4 @@
-"""SQLAlchemy models for Milestone 1."""
+"""SQLAlchemy models for CloudPilot AI."""
 
 from __future__ import annotations
 
@@ -25,6 +25,8 @@ from app.core.enums import (
     ConfidenceLevel,
     FindingStatus,
     FindingType,
+    ForecastGranularity,
+    ForecastMethod,
     ImportKind,
     ImportStatus,
     RiskLevel,
@@ -323,4 +325,63 @@ class SavingsScenario(Base):
     proposed_monthly_cost: Mapped[Decimal] = mapped_column(ScaledDecimal(6), nullable=False)
     estimated_monthly_savings: Mapped[Decimal] = mapped_column(ScaledDecimal(6), nullable=False)
     assumptions: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
+    created_at: Mapped[datetime] = mapped_column(UtcDateTime, nullable=False, default=utcnow)
+
+
+class ForecastRun(Base):
+    """Immutable record of one deterministic spend-forecast run."""
+
+    __tablename__ = "forecast_runs"
+    __table_args__ = (Index("ix_forecast_runs_created_at", "created_at"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="completed")
+    method: Mapped[ForecastMethod] = mapped_column(
+        Enum(ForecastMethod, native_enum=False, values_callable=_enum_values, length=32),
+        nullable=False,
+    )
+    granularity: Mapped[ForecastGranularity] = mapped_column(
+        Enum(ForecastGranularity, native_enum=False, values_callable=_enum_values, length=8),
+        nullable=False,
+        default=ForecastGranularity.DAY,
+    )
+    reference_date: Mapped[date | None] = mapped_column(Date)
+    history_start: Mapped[date | None] = mapped_column(Date)
+    history_end: Mapped[date | None] = mapped_column(Date)
+    horizon_start: Mapped[date | None] = mapped_column(Date)
+    horizon_end: Mapped[date | None] = mapped_column(Date)
+    currency: Mapped[str | None] = mapped_column(String(3))
+    filters: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
+    config: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
+    series_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    evaluation: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
+    stats: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
+    notes: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
+    warnings: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
+    duration_ms: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    created_at: Mapped[datetime] = mapped_column(UtcDateTime, nullable=False, default=utcnow)
+    completed_at: Mapped[datetime | None] = mapped_column(UtcDateTime)
+
+
+class ForecastPoint(Base):
+    """One daily predicted spend value with an empirical interval."""
+
+    __tablename__ = "forecast_points"
+    __table_args__ = (
+        Index("ix_forecast_points_run_currency_period", "run_id", "currency", "period"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    run_id: Mapped[int] = mapped_column(
+        ForeignKey("forecast_runs.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    currency: Mapped[str] = mapped_column(String(3), nullable=False)
+    period: Mapped[date] = mapped_column(Date, nullable=False)
+    predicted_cost: Mapped[Decimal] = mapped_column(ScaledDecimal(6), nullable=False)
+    lower_bound: Mapped[Decimal] = mapped_column(ScaledDecimal(6), nullable=False)
+    upper_bound: Mapped[Decimal] = mapped_column(ScaledDecimal(6), nullable=False)
+    method: Mapped[ForecastMethod] = mapped_column(
+        Enum(ForecastMethod, native_enum=False, values_callable=_enum_values, length=32),
+        nullable=False,
+    )
     created_at: Mapped[datetime] = mapped_column(UtcDateTime, nullable=False, default=utcnow)

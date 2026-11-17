@@ -1,4 +1,4 @@
-# CloudPilot AI — Threat Model (v2, Milestones 1–3)
+# CloudPilot AI — Threat Model (v3, Milestones 1–4)
 
 Scope: local-first MVP running on a developer/recruiter machine or a single
 container. No cloud credentials, no cloud write paths, no authentication yet.
@@ -42,7 +42,7 @@ flowchart LR
 4. LLM → App (M5): output is untrusted and schema-validated.
 5. App → cloud: **no boundary exists in the MVP** — no credentials, no writes.
 
-## 4. Threats and mitigations (Milestones 1–3)
+## 4. Threats and mitigations (Milestones 1–4)
 
 | # | Threat | Impact | Mitigation (implemented now) | Residual / planned |
 |---|---|---|---|---|
@@ -67,8 +67,12 @@ flowchart LR
 | T19 | Missing price silently replaced by a guessed or fabricated value | Wrong savings | Rightsizing requires an exact catalogue entry; missing SKU/price produces no finding and is disclosed in `stats.skipped` | Vendor catalogue expansion |
 | T20 | Synthetic demo prices mistaken for vendor quotes | False savings claims | `is_synthetic`, `example.invalid` URLs, per-finding warnings, run-level flag, API notes, README banner | UI badge (M6) |
 | T21 | Stale price used outside its effective window | Wrong savings | Prices are selected by `effective_from`/`effective_to` on the cost-window end date; incomplete coverage downgrades confidence and adds a warning | Freshness threshold and source refresh job |
-| T22 | Utilization data is too short or stale to support a finding | Misleading recommendation | Requires 14 distinct days and 24 samples inside the analysis window; otherwise skipped and disclosed | Statistical confidence intervals (M4) |
+| T22 | Utilization data is too short or stale to support a finding | Misleading recommendation | Requires 14 distinct days and 24 samples inside the analysis window; otherwise skipped and disclosed | — (empirical holdout intervals exist for forecasts, not findings) |
 | T23 | Low utilization presented as proof of waste | Unsafe stop/resize decision | Findings are candidates; every finding includes assumptions, warnings, risk and an owner-review requirement; no action endpoint exists | Approval workflow with evidence (M6) |
+| T24 | Forecast accuracy reported from data the model already saw | Overstated confidence in budgets | Chronological holdout; holdout predicted only from earlier values; model refit on full history only after evaluation; metrics and exclusions stored | Backtesting across multiple windows |
+| T25 | Prediction interval treated as a guarantee | Under-budgeting | Interval is an empirical residual quantile, returned with its quantile, width and warnings; horizon > holdout and degenerate intervals are flagged; no probability claim | Calibrated/rolling-origin intervals |
+| T26 | Billing gaps or restatements silently change the series | Unstable or misleading forecast | Missing days are explicitly zero-filled and disclosed; history is capped and reported; runs are immutable snapshots | Restatement/version semantics |
+| T27 | Insufficient history extrapolated into a confident forecast | Fabricated projection | Fewer than 28 days or a holdout that consumes history returns `409` with a reason; skipped currencies are listed; no fallback model | — |
 
 ## 5. Explicit non-goals and guarantees
 
@@ -79,6 +83,9 @@ flowchart LR
   idle finding with an explicit zero-replacement assumption).
 - Low CPU/memory utilization alone is **not** proof a resource is unnecessary.
   Findings are labelled candidates requiring owner review.
+- Forecasts are **evaluated baselines**, not promises. Every response includes
+  held-out error metrics, an empirical interval and warnings about short history
+  or a short holdout. Insufficient history is rejected instead of extrapolated.
 - Synthetic prices and synthetic billing/utilization data are labelled and never
   presented as live vendor or customer data.
 
@@ -111,6 +118,7 @@ flowchart LR
 | Evidence-linked savings | | | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Price provenance + synthetic flag | | | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Observation-window minimums | | | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Holdout evaluation + explicit intervals | | | | ✅ | ✅ | ✅ | ✅ |
 | LLM schema + numeral validation | | | | | required | | |
 | Prompt-injection tests | | | | | required | | |
 | Auth / rate limiting | | | | | | | required |
