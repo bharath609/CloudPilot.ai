@@ -88,6 +88,11 @@
       "type": "string",
       "maxLength": 120,
       "description": "Blank is normalized to 'unassigned' with a warning."
+    },
+    "sku": {
+      "type": "string",
+      "maxLength": 120,
+      "description": "Optional provider SKU used to join a sourced catalogue price. Never inferred; absence is not a warning."
     }
   }
 }

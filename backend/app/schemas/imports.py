@@ -90,6 +90,7 @@ class CostRecordPreview(BaseModel):
     amount: Decimal
     currency: str
     tags: dict[str, str]
+    sku: str | None = None
 
 
 class MetricPreview(BaseModel):

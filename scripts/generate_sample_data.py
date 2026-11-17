@@ -54,6 +54,14 @@ UTILIZATION_HEADER = [
     "sample_window_minutes",
 ]
 
+#: Optional billing SKUs. These names are fabricated for the demo catalogue and
+#: are not real provider SKUs.
+SKU_BY_RESOURCE = {
+    "i-demo-0a1b2c3d4e5f": "demo.ec2.c5.2xlarge",
+    "i-demo-0a1b2c3d4e60": "demo.ec2.c5.2xlarge",
+    "i-demo-0a1b2c3d4e61": "demo.ec2.t3.small",
+}
+
 
 def money(value: Decimal) -> Decimal:
     return value.quantize(MAX_AMOUNT, rounding=ROUND_HALF_UP)
@@ -223,9 +231,10 @@ def generate_billing() -> None:
                     "USD",
                     team,
                     owner,
+                    SKU_BY_RESOURCE.get(resource_id, ""),
                 ]
             )
-    write_csv(SAMPLE_DIR / "billing_sample.csv", BILLING_HEADER, rows)
+    write_csv(SAMPLE_DIR / "billing_sample.csv", [*BILLING_HEADER, "sku"], rows)
 
 
 def generate_utilization() -> None:

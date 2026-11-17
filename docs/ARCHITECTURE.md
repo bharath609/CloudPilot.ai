@@ -32,18 +32,20 @@ flowchart TD
   N --> O[Report export]
 ```
 
-Milestone 1 implements the left-hand slice: upload → validation → normalization
-→ persistence → auditable errors. Everything to the right of `F` is planned.
+Milestones 1–3 implement the left-hand slice plus deterministic analysis:
+upload → validation → normalization → persistence → cost analytics → waste
+detection and savings scenarios. Forecasting, the AI advisor, the dashboard and
+exports remain planned.
 
 ## 3. Current repository layout
 
 ```text
 CloudPilot AI/
 ├── backend/
-│   ├── alembic/                 # migrations (0001 initial schema)
+│   ├── alembic/                 # migrations (0001 initial, 0002 waste detection)
 │   ├── app/
 │   │   ├── main.py              # app factory, lifespan, exception handlers
-│   │   ├── api/routes/          # health.py, imports.py, costs.py
+│   │   ├── api/routes/          # health, imports, costs, prices, analysis, findings
 │   │   ├── core/
 │   │   │   ├── config.py        # typed settings (pydantic-settings)
 │   │   │   ├── errors.py        # AppError taxonomy + error envelope
@@ -53,6 +55,8 @@ CloudPilot AI/
 │   │   │   └── models.py        # ORM tables
 │   │   ├── schemas/             # Pydantic request/response models
 │   │   ├── services/analytics.py # Decimal spend aggregation + de-duplication
+│   │   ├── services/analysis.py  # idle/rightsize rules, evidence, scenarios
+│   │   ├── services/prices.py    # catalogue loader, provenance, lookup
 │   │   ├── services/ingestion/  # csv_reader, validators, billing, utilization
 │   │   └── services/imports/    # import orchestration + queries
 │   ├── tests/                   # pytest suite + fixtures
@@ -62,17 +66,18 @@ CloudPilot AI/
 │   ├── schemas/                 # machine-readable CSV contracts
 │   └── README.md                # data policy + synthetic-data notice
 ├── docs/                        # this file + plan, dictionary, threat model
-├── pricing/                     # catalogue placeholder + sources.md
+├── pricing/
+│   ├── catalogue/demo_prices.csv # clearly labelled synthetic demo catalogue
+│   └── sources.md               # provenance rules
 ├── scripts/                     # sample-data generator + seed script
 ├── docker-compose.yml
 ├── Dockerfile
 └── README.md
 ```
 
-The guide's suggested `services/normalization`, `costing`, `detection`,
-`forecasting`, `recommendations` packages are intentionally **not** created yet.
-Empty scaffolding suggests functionality that does not exist; each is added with
-its milestone.
+The guide's suggested `services/forecasting`, `recommendations` and LLM packages
+are intentionally **not** created yet. Empty scaffolding suggests functionality
+that does not exist; each is added with its milestone.
 
 ## 4. Request flow: CSV import
 
@@ -127,6 +132,8 @@ file (422), oversized file (413) and exact duplicate (409).
 | `services/ingestion` | Parsing, validation, normalization | perform commits |
 | `services/imports` | Orchestration, transaction boundary, audit | parse CSV syntax |
 | `services/analytics` | Read-only Decimal aggregation, de-duplication | mutate data or call an LLM |
+| `services/analysis` | Deterministic rules, evidence, savings scenarios | invent SKUs, prices or savings; call an LLM |
+| `services/prices` | Catalogue validation, provenance, exact lookup | fetch live provider prices or guess a fallback |
 | `db` | Persistence, exact types | know about HTTP |
 | `llm` (M5) | Explanation only | calculate or mutate data |
 
@@ -189,6 +196,51 @@ Key properties:
 - **Rounding.** Group shares are quantized to 3 decimal places with `ROUND_HALF_UP`;
   totals stay at 6 decimal places and are never re-rounded.
 
+### 6.2 Waste detection path (Milestone 3)
+
+`services/analysis.py` is a deterministic batch job over already-imported data.
+
+```text
+POST /api/analysis/run
+        |
+        v
+scope -> latest usage_date -> 30-day cost window -> de-duplicated billing rows
+                                               |
+                    group by resource -------+------ utilization samples in the
+                                               |       same window
+                                               v
+                          idle rule OR rightsize rule
+                                               |
+                         exact price lookup (same provider/region/
+                         currency/unit, effective on window end)
+                                               |
+                                               v
+                       findings + one savings scenario per finding
+                       (baseline, proposed, savings, evidence IDs,
+                        assumptions, warnings, confidence, risk)
+```
+
+Rules and guarantees:
+
+- **Idle** requires every observed CPU p95 sample below 15% **and** every memory
+  p95 sample below 30%. Savings assume a full-window stop with zero replacement
+  cost, so `proposed = 0` and `savings = baseline`.
+- **Rightsize** requires mean CPU below 50% and mean memory below 70%, plus an
+  explicit billing `sku` and a catalogue `replacement_sku`. The proposal scales
+  the billing baseline by the exact list-price ratio:
+  `proposed = baseline × replacement_price / current_price`.
+- **No inference.** A missing SKU, missing price, mixed currency or insufficient
+  observation produces no finding. The run's `stats.skipped` count and notes
+  disclose what was skipped; no price or saving is invented.
+- **Evidence.** Each finding stores capped cost-record and metric IDs plus counts,
+  import IDs, the cost window, the observation window and the rule configuration.
+- **Currency.** One finding never spans currencies, and run totals are a
+  per-currency map that must not be added together.
+- **Reproducibility.** Runs are immutable. Repeating a run creates new finding
+  rows with identical arithmetic; old runs remain queryable by `run_id`.
+- **Synthetic provenance.** A finding that used a synthetic catalogue entry sets
+  `uses_synthetic_prices=true` and includes a warning. The run is flagged too.
+
 ## 7. Data model
 
 ```mermaid
@@ -196,6 +248,9 @@ erDiagram
   IMPORTS ||--o{ COST_RECORDS : "contains"
   IMPORTS ||--o{ RESOURCE_METRICS : "contains"
   IMPORTS ||--o{ IMPORT_ISSUES : "reports"
+  ANALYSIS_RUNS ||--o{ FINDINGS : "produces"
+  FINDINGS ||--|| SAVINGS_SCENARIOS : "explains"
+  PRICE_ENTRIES }o--o{ FINDINGS : "sources"
 
   IMPORTS {
     int id PK
@@ -227,6 +282,7 @@ erDiagram
     string usage_unit
     decimal amount
     string currency
+    string sku "optional"
     json tags
     json raw
   }
@@ -254,6 +310,63 @@ erDiagram
     string message
     string raw_value
   }
+  PRICE_ENTRIES {
+    int id PK
+    string provider
+    string sku
+    string region
+    string usage_unit
+    decimal unit_price
+    string currency
+    date effective_from
+    date effective_to
+    string replacement_sku
+    bool is_synthetic
+    string source_name
+    string source_url
+    datetime source_retrieved_at
+  }
+  ANALYSIS_RUNS {
+    int id PK
+    date reference_date
+    date cost_window_start
+    date cost_window_end
+    string currency
+    json rule_config
+    int finding_count
+    json total_savings_by_currency
+    bool uses_synthetic_prices
+    json stats
+  }
+  FINDINGS {
+    int id PK
+    int run_id FK
+    string finding_type
+    string status
+    string resource_id
+    string currency
+    string current_sku
+    string recommended_sku
+    decimal baseline_monthly_cost
+    decimal proposed_monthly_cost
+    decimal estimated_monthly_savings
+    string confidence
+    string risk
+    json evidence
+    json assumptions
+    json warnings
+    bool uses_synthetic_prices
+  }
+  SAVINGS_SCENARIOS {
+    int id PK
+    int finding_id FK
+    string method
+    string currency
+    decimal baseline_monthly_cost
+    decimal proposed_monthly_cost
+    decimal estimated_monthly_savings
+    json assumptions
+  }
 ```
 
 The guide names the import table `billing_imports`. Because utilization files
@@ -274,6 +387,10 @@ with a `kind` column. See ADR-004.
 | ADR-008 | UTC everywhere | Avoid DST ambiguity in cost windows | Naive input timestamps are treated as UTC and flagged in docs |
 | ADR-009 | Billing duplicates stored but excluded from analytics | Corrected exports remain importable while totals stay single-counted | Changed-amount restatements are new business keys; supersede semantics postponed |
 | ADR-010 | Analytics partition every aggregate by currency | Prevents silent FX mixing | Multi-currency responses need per-currency presentation in the UI |
+| ADR-011 | Waste rules are fixed thresholds stored in settings | Explainable and testable; no opaque model | Not statistical anomaly detection |
+| ADR-012 | Rightsizing uses a catalogue price ratio | Avoids inventing a SKU price; exact `Decimal` arithmetic | Requires billing `sku` and catalogue `replacement_sku`; list prices only |
+| ADR-013 | Every price row carries provenance and an `is_synthetic` flag | Demo prices can never be mistaken for vendor quotes | Synthetic catalogue is deliberately obvious (`example.invalid`) |
+| ADR-014 | Analysis runs and findings are immutable | Savings stay auditable and reproducible | Re-running creates new rows; no in-place edit API |
 
 ## 9. Deployment
 
@@ -297,7 +414,9 @@ flowchart LR
 - **New provider export** → new parser module under `services/ingestion/` that
   emits the same normalized draft objects; no schema change for the core.
 - **New detection rule** → pure function over `(cost records, metrics, price
-  entries)` returning findings with evidence IDs (Milestone 3).
+  entries)` returning findings with evidence IDs, registered in
+  `services/analysis.py`; the result schema already carries assumptions,
+  warnings and provenance.
 - **New LLM provider** → adapter implementing the same typed interface, with
   schema validation at the boundary (Milestone 5).
 - **New currency** → add to the allowlist and ensure the aggregation layer

@@ -57,6 +57,7 @@ class CostDraft:
     currency: str
     tags: dict[str, str]
     raw: dict[str, str]
+    sku: str | None = None
 
 
 @dataclass(slots=True)

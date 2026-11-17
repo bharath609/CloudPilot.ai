@@ -10,6 +10,7 @@ from typing import Any
 from sqlalchemy import (
     JSON,
     BigInteger,
+    Boolean,
     Date,
     Enum,
     ForeignKey,
@@ -20,7 +21,16 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.core.enums import ImportKind, ImportStatus, Severity
+from app.core.enums import (
+    ConfidenceLevel,
+    FindingStatus,
+    FindingType,
+    ImportKind,
+    ImportStatus,
+    RiskLevel,
+    ScenarioMethod,
+    Severity,
+)
 from app.core.time import utcnow
 from app.db.base import Base, ScaledDecimal, UtcDateTime
 
@@ -101,6 +111,9 @@ class CostRecord(Base):
     amount: Mapped[Decimal] = mapped_column(ScaledDecimal(6), nullable=False)
     currency: Mapped[str] = mapped_column(String(3), nullable=False)
 
+    #: Optional provider SKU used to join a sourced catalogue price. Never inferred.
+    sku: Mapped[str | None] = mapped_column(String(120), index=True)
+
     tags: Mapped[dict[str, str]] = mapped_column(JSON, nullable=False, default=dict)
     raw_json: Mapped[dict[str, str]] = mapped_column(JSON, nullable=False, default=dict)
     created_at: Mapped[datetime] = mapped_column(UtcDateTime, nullable=False, default=utcnow)
@@ -153,4 +166,161 @@ class ImportIssue(Base):
     )
     message: Mapped[str] = mapped_column(String(500), nullable=False)
     raw_value: Mapped[str | None] = mapped_column(String(200))
+    created_at: Mapped[datetime] = mapped_column(UtcDateTime, nullable=False, default=utcnow)
+
+
+class PriceEntry(Base):
+    """One sourced unit price for a provider SKU on an effective date range.
+
+    Synthetic demo entries are allowed only when ``is_synthetic`` is true. The
+    API and every finding expose that flag so a demo catalogue is never passed
+    off as a vendor price list.
+    """
+
+    __tablename__ = "price_entries"
+    __table_args__ = (
+        UniqueConstraint(
+            "provider",
+            "sku",
+            "region",
+            "currency",
+            "usage_unit",
+            "effective_from",
+            name="uq_price_entries_identity",
+        ),
+        Index("ix_price_entries_provider_sku", "provider", "sku"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    provider: Mapped[str] = mapped_column(String(16), nullable=False)
+    sku: Mapped[str] = mapped_column(String(120), nullable=False)
+    display_name: Mapped[str] = mapped_column(String(160), nullable=False)
+    service: Mapped[str] = mapped_column(String(80), nullable=False)
+    region: Mapped[str] = mapped_column(String(64), nullable=False)
+    usage_unit: Mapped[str] = mapped_column(String(32), nullable=False)
+    unit_price: Mapped[Decimal] = mapped_column(ScaledDecimal(6), nullable=False)
+    currency: Mapped[str] = mapped_column(String(3), nullable=False)
+    effective_from: Mapped[date] = mapped_column(Date, nullable=False)
+    effective_to: Mapped[date | None] = mapped_column(Date)
+    replacement_sku: Mapped[str | None] = mapped_column(String(120))
+    is_synthetic: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    source_name: Mapped[str] = mapped_column(String(200), nullable=False)
+    source_url: Mapped[str] = mapped_column(String(500), nullable=False)
+    source_retrieved_at: Mapped[datetime | None] = mapped_column(UtcDateTime)
+    notes: Mapped[str | None] = mapped_column(String(1000))
+    created_at: Mapped[datetime] = mapped_column(UtcDateTime, nullable=False, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        UtcDateTime, nullable=False, default=utcnow, onupdate=utcnow
+    )
+
+
+class AnalysisRun(Base):
+    """Immutable record of one deterministic waste-detection run."""
+
+    __tablename__ = "analysis_runs"
+    __table_args__ = (Index("ix_analysis_runs_created_at", "created_at"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="completed")
+    reference_date: Mapped[date | None] = mapped_column(Date)
+    cost_window_start: Mapped[date | None] = mapped_column(Date)
+    cost_window_end: Mapped[date | None] = mapped_column(Date)
+    currency: Mapped[str | None] = mapped_column(String(3))
+    filters: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
+    rule_config: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
+    finding_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    total_savings_by_currency: Mapped[dict[str, str]] = mapped_column(
+        JSON, nullable=False, default=dict
+    )
+    uses_synthetic_prices: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    notes: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
+    stats: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
+    duration_ms: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    created_at: Mapped[datetime] = mapped_column(UtcDateTime, nullable=False, default=utcnow)
+    completed_at: Mapped[datetime | None] = mapped_column(UtcDateTime)
+
+
+class Finding(Base):
+    """A deterministic, evidence-backed waste candidate. Never an action."""
+
+    __tablename__ = "findings"
+    __table_args__ = (
+        Index("ix_findings_run_type", "run_id", "finding_type"),
+        Index("ix_findings_resource", "resource_id"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    run_id: Mapped[int] = mapped_column(
+        ForeignKey("analysis_runs.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    finding_type: Mapped[FindingType] = mapped_column(
+        Enum(FindingType, native_enum=False, values_callable=_enum_values, length=32),
+        nullable=False,
+    )
+    status: Mapped[FindingStatus] = mapped_column(
+        Enum(FindingStatus, native_enum=False, values_callable=_enum_values, length=16),
+        nullable=False,
+        default=FindingStatus.OPEN,
+    )
+
+    provider: Mapped[str] = mapped_column(String(16), nullable=False)
+    account_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    service: Mapped[str] = mapped_column(String(80), nullable=False)
+    resource_id: Mapped[str] = mapped_column(String(200), nullable=False)
+    region: Mapped[str] = mapped_column(String(64), nullable=False)
+    environment: Mapped[str] = mapped_column(String(16), nullable=False)
+    project: Mapped[str] = mapped_column(String(120), nullable=False)
+    currency: Mapped[str] = mapped_column(String(3), nullable=False)
+
+    current_sku: Mapped[str | None] = mapped_column(String(120))
+    recommended_sku: Mapped[str | None] = mapped_column(String(120))
+
+    baseline_monthly_cost: Mapped[Decimal] = mapped_column(ScaledDecimal(6), nullable=False)
+    proposed_monthly_cost: Mapped[Decimal] = mapped_column(ScaledDecimal(6), nullable=False)
+    estimated_monthly_savings: Mapped[Decimal] = mapped_column(ScaledDecimal(6), nullable=False)
+    savings_pct: Mapped[Decimal] = mapped_column(ScaledDecimal(3), nullable=False)
+
+    confidence: Mapped[ConfidenceLevel] = mapped_column(
+        Enum(ConfidenceLevel, native_enum=False, values_callable=_enum_values, length=16),
+        nullable=False,
+    )
+    risk: Mapped[RiskLevel] = mapped_column(
+        Enum(RiskLevel, native_enum=False, values_callable=_enum_values, length=16),
+        nullable=False,
+    )
+
+    cost_window_start: Mapped[date] = mapped_column(Date, nullable=False)
+    cost_window_end: Mapped[date] = mapped_column(Date, nullable=False)
+    observation_start: Mapped[datetime | None] = mapped_column(UtcDateTime)
+    observation_end: Mapped[datetime | None] = mapped_column(UtcDateTime)
+    observation_days: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    sample_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+    metrics: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
+    evidence: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
+    assumptions: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
+    warnings: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
+    price_source: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
+    uses_synthetic_prices: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    created_at: Mapped[datetime] = mapped_column(UtcDateTime, nullable=False, default=utcnow)
+
+
+class SavingsScenario(Base):
+    """The reproducible arithmetic behind one finding's savings estimate."""
+
+    __tablename__ = "savings_scenarios"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    finding_id: Mapped[int] = mapped_column(
+        ForeignKey("findings.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    method: Mapped[ScenarioMethod] = mapped_column(
+        Enum(ScenarioMethod, native_enum=False, values_callable=_enum_values, length=32),
+        nullable=False,
+    )
+    currency: Mapped[str] = mapped_column(String(3), nullable=False)
+    baseline_monthly_cost: Mapped[Decimal] = mapped_column(ScaledDecimal(6), nullable=False)
+    proposed_monthly_cost: Mapped[Decimal] = mapped_column(ScaledDecimal(6), nullable=False)
+    estimated_monthly_savings: Mapped[Decimal] = mapped_column(ScaledDecimal(6), nullable=False)
+    assumptions: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
     created_at: Mapped[datetime] = mapped_column(UtcDateTime, nullable=False, default=utcnow)

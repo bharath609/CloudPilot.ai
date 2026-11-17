@@ -1,4 +1,4 @@
-# CloudPilot AI — Threat Model (v1, Milestone 1)
+# CloudPilot AI — Threat Model (v2, Milestones 1–3)
 
 Scope: local-first MVP running on a developer/recruiter machine or a single
 container. No cloud credentials, no cloud write paths, no authentication yet.
@@ -42,7 +42,7 @@ flowchart LR
 4. LLM → App (M5): output is untrusted and schema-validated.
 5. App → cloud: **no boundary exists in the MVP** — no credentials, no writes.
 
-## 4. Threats and mitigations (Milestone 1)
+## 4. Threats and mitigations (Milestones 1–3)
 
 | # | Threat | Impact | Mitigation (implemented now) | Residual / planned |
 |---|---|---|---|---|
@@ -63,17 +63,24 @@ flowchart LR
 | T15 | Secrets committed to Git | Credential leak | `.env` ignored, `.env.example` only, no keys needed for M1 | Secret scanning in CI (M7) |
 | T16 | Import history tampering (no approvals yet) | Audit erosion | Append-only imports, SHA-256, row numbers, raw JSON | Hash-chained audit log (M7) |
 | T17 | Supply-chain compromise of dependencies | Code execution | Pinned ranges, minimal dependency set, lockfile in CI (M7) | `pip-audit` in CI |
-| T18 | Hostile LLM output (fabricated prices, injected commands) | Wrong advice, unsafe action | Not present in M1 | **M5:** Pydantic schema, evidence-ID rejection, numeric allowlist, no tool access to cloud |
+| T18 | Hostile LLM output (fabricated prices, injected commands) | Wrong advice, unsafe action | Not present yet | **M5:** Pydantic schema, evidence-ID rejection, numeric allowlist, no tool access to cloud |
+| T19 | Missing price silently replaced by a guessed or fabricated value | Wrong savings | Rightsizing requires an exact catalogue entry; missing SKU/price produces no finding and is disclosed in `stats.skipped` | Vendor catalogue expansion |
+| T20 | Synthetic demo prices mistaken for vendor quotes | False savings claims | `is_synthetic`, `example.invalid` URLs, per-finding warnings, run-level flag, API notes, README banner | UI badge (M6) |
+| T21 | Stale price used outside its effective window | Wrong savings | Prices are selected by `effective_from`/`effective_to` on the cost-window end date; incomplete coverage downgrades confidence and adds a warning | Freshness threshold and source refresh job |
+| T22 | Utilization data is too short or stale to support a finding | Misleading recommendation | Requires 14 distinct days and 24 samples inside the analysis window; otherwise skipped and disclosed | Statistical confidence intervals (M4) |
+| T23 | Low utilization presented as proof of waste | Unsafe stop/resize decision | Findings are candidates; every finding includes assumptions, warnings, risk and an owner-review requirement; no action endpoint exists | Approval workflow with evidence (M6) |
 
 ## 5. Explicit non-goals and guarantees
 
 - The application **cannot** stop, resize, delete or tag any cloud resource. It
   holds no credentials and makes no provider API calls.
-- The application does not claim guaranteed savings; every figure must carry
-  assumptions, a time window and a price source (M3).
+- The application does not claim guaranteed savings; every figure carries
+  assumptions, a cost window, an observation window and a price source (or is an
+  idle finding with an explicit zero-replacement assumption).
 - Low CPU/memory utilization alone is **not** proof a resource is unnecessary.
   Findings are labelled candidates requiring owner review.
-- Synthetic data is not represented as live cloud data anywhere in the UI/docs.
+- Synthetic prices and synthetic billing/utilization data are labelled and never
+  presented as live vendor or customer data.
 
 ## 6. Assumptions and residual risk
 
@@ -98,7 +105,9 @@ flowchart LR
 | No cloud write credentials | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Currency partitioning | ✅ flagged | ✅ enforced | required | required | required | required | required |
 | Business-key de-duplication | ✅ warned | ✅ excluded | ✅ | ✅ | ✅ | ✅ | ✅ |
-| Evidence-linked savings | | | required | | | | |
+| Evidence-linked savings | | | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Price provenance + synthetic flag | | | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Observation-window minimums | | | ✅ | ✅ | ✅ | ✅ | ✅ |
 | LLM schema + numeral validation | | | | | required | | |
 | Prompt-injection tests | | | | | required | | |
 | Auth / rate limiting | | | | | | | required |

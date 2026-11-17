@@ -25,6 +25,7 @@ from app.core.enums import ImportKind, ImportStatus  # noqa: E402
 from app.db.base import Database  # noqa: E402
 from app.db.models import ImportRecord  # noqa: E402
 from app.services.imports.service import ImportService  # noqa: E402
+from app.services.prices import load_price_catalogue, resolve_catalogue_path  # noqa: E402
 
 SAMPLE_DIR = REPO_ROOT / "data" / "sample"
 FILES: list[tuple[ImportKind, str]] = [
@@ -44,6 +45,16 @@ def main() -> int:
         "--force",
         action="store_true",
         help="Import even when an identical file hash already exists.",
+    )
+    parser.add_argument(
+        "--catalogue",
+        default=None,
+        help="Price catalogue CSV. Defaults to CLOUDPILOT_PRICE_CATALOGUE_PATH.",
+    )
+    parser.add_argument(
+        "--no-prices",
+        action="store_true",
+        help="Skip loading the price catalogue.",
     )
     args = parser.parse_args()
 
@@ -97,6 +108,23 @@ def main() -> int:
             )
             if record.status in {ImportStatus.INVALID, ImportStatus.PARTIAL, ImportStatus.FAILED}:
                 failures += 1
+
+        if not args.no_prices:
+            catalogue = resolve_catalogue_path(settings, args.catalogue)
+            if not catalogue.exists():
+                print(f"missing price catalogue: {catalogue}")
+                failures += 1
+            else:
+                result = load_price_catalogue(session, catalogue)
+                shown = (
+                    catalogue.relative_to(REPO_ROOT)
+                    if catalogue.is_relative_to(REPO_ROOT)
+                    else catalogue
+                )
+                print(
+                    f"prices: inserted={result.inserted} updated={result.updated} "
+                    f"total={result.total} synthetic={result.synthetic} path={shown}"
+                )
     finally:
         session.close()
         database.dispose()

@@ -11,7 +11,7 @@ data.** The application cannot call any cloud provider.
 
 | File | Rows | Purpose | Expected import result |
 |---|---|---|---|
-| `sample/billing_sample.csv` | 480 | 60 days × 8 resources across AWS, Azure and GCP, all USD | `valid` |
+| `sample/billing_sample.csv` | 480 | 60 days × 8 resources across AWS, Azure and GCP, all USD; optional `sku` on 3 EC2 resources | `valid` |
 | `sample/utilization_sample.csv` | 2,880 | 30 days of hourly samples for 4 resources | `valid` after billing; `valid_with_warnings` if billing is missing |
 | `sample/billing_row_errors.csv` | 10 | Bad date, negative cost, bad currency/provider/environment, duplicate, missing field, NaN | `partial` (2 accepted, 8 rejected) |
 | `sample/billing_missing_column.csv` | 1 | `cost_amount` removed | `invalid`, 0 rows stored |
@@ -29,6 +29,9 @@ Load the clean sample into the configured database:
 ```bash
 python scripts/seed_sample_data.py
 ```
+
+The seed script also loads the synthetic price catalogue. Use `--no-prices` to
+skip it or `--catalogue path/to/file.csv` to choose another catalogue.
 
 ## Contracts
 
@@ -52,8 +55,18 @@ but ignored by analytics.
 ## Pricing assumptions
 
 The per-unit prices embedded in the generator are illustrative, not vendor
-prices. A real price catalogue with source URLs, retrieval dates and effective
-periods is a Milestone 3 deliverable (see `../pricing/sources.md`).
+prices. `pricing/catalogue/demo_prices.csv` is also synthetic: every row is
+marked `is_synthetic=true`, uses an `example.invalid` source URL and is exposed
+as demo data by the API and findings. A real catalogue must supply a real source
+URL, retrieval date and effective period (see `../pricing/sources.md`).
+
+## Expected analysis result
+
+With the sample data and demo catalogue loaded, `POST /api/analysis/run` returns
+two idle resources and one rightsizing candidate. Total estimated savings are
+USD `276.720019` for the 30-day window `2026-01-31..2026-03-01`. Every number is
+recomputable from the CSV files with `Decimal` arithmetic. These are synthetic
+sample findings, not a real savings claim.
 
 ## Privacy
 

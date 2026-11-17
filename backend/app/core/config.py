@@ -6,6 +6,7 @@ All settings can be overridden with environment variables prefixed with
 
 from __future__ import annotations
 
+from decimal import Decimal
 from functools import lru_cache
 from pathlib import Path
 
@@ -57,6 +58,39 @@ class Settings(BaseSettings):
         "Hrs,Hours,GB,GB-Mo,GB-Month,Requests,Invocations,Count,Units,"
         "vCPU-Hrs,IOPS,MB,Months,Days,LCU-Hrs"
     )
+
+    # Waste detection -------------------------------------------------------
+    idle_cpu_p95_pct: Decimal = Field(
+        default=Decimal("15"),
+        ge=0,
+        le=100,
+        description="A resource is idle only when every CPU p95 sample is below this percentage.",
+    )
+    idle_memory_p95_pct: Decimal = Field(
+        default=Decimal("30"),
+        ge=0,
+        le=100,
+        description="A resource is idle only when every memory p95 sample is below this percentage.",
+    )
+    rightsize_cpu_avg_pct: Decimal = Field(
+        default=Decimal("50"),
+        ge=0,
+        le=100,
+        description="Average CPU must be below this percentage to consider rightsizing.",
+    )
+    rightsize_memory_avg_pct: Decimal = Field(
+        default=Decimal("70"),
+        ge=0,
+        le=100,
+        description="Average memory must be below this percentage to consider rightsizing.",
+    )
+    min_observation_days: int = Field(default=14, ge=1)
+    min_samples: int = Field(default=24, ge=1)
+    analysis_cost_days: int = Field(default=30, ge=1, le=366)
+    min_monthly_savings: Decimal = Field(default=Decimal("1.00"), ge=0)
+
+    # Price catalogue -------------------------------------------------------
+    price_catalogue_path: str = "pricing/catalogue/demo_prices.csv"
 
     @property
     def cors_origin_list(self) -> list[str]:

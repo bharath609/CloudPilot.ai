@@ -14,7 +14,12 @@ from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from app.core.config import Settings
 from app.core.enums import ENVIRONMENTS, PROVIDERS, Severity
 from app.core.time import earliest_allowed_date, latest_allowed_date
-from app.services.ingestion.csv_reader import BILLING_COLUMNS, UTILIZATION_COLUMNS, ParsedCsv
+from app.services.ingestion.csv_reader import (
+    BILLING_COLUMNS,
+    BILLING_OPTIONAL_COLUMNS,
+    UTILIZATION_COLUMNS,
+    ParsedCsv,
+)
 from app.services.ingestion.types import (
     CostDraft,
     CsvRow,
@@ -433,6 +438,7 @@ def validate_billing(
         currency = reader.currency("currency", settings.allowed_currency_set)
         team = reader.text("tag_team", max_len=80, required=False, default="untagged")
         owner = reader.text("tag_owner", max_len=120, required=False, default="unassigned")
+        sku = reader.text("sku", max_len=120, required=False)
 
         if reader.value("tag_team") == "":
             reader.add_warning("untagged_team", "tag_team is blank; stored as 'untagged'.", column="tag_team")
@@ -500,13 +506,16 @@ def validate_billing(
                 currency=currency,
                 tags={"team": team, "owner": owner},
                 raw=row.raw,
+                sku=sku,
             )
         )
         currencies.add(currency)
         providers.add(provider)
         observed_dates.append(usage_date)
 
-    for column in _unexpected_columns(parsed, BILLING_COLUMNS):
+    for column in _unexpected_columns(
+        parsed, (*BILLING_COLUMNS, *BILLING_OPTIONAL_COLUMNS)
+    ):
         issues.append(
             FieldIssue(
                 code="unexpected_column",

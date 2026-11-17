@@ -287,6 +287,7 @@ class ImportService:
                 currency=draft.currency,
                 tags=draft.tags,
                 raw_json=draft.raw,
+                sku=draft.sku,
             )
             for draft in drafts
             if isinstance(draft, CostDraft)

@@ -31,6 +31,10 @@ BILLING_COLUMNS: tuple[str, ...] = (
     "tag_owner",
 )
 
+#: Optional billing columns. Their presence is never a warning; their absence is
+#: not an error. ``sku`` links a billing row to a sourced catalogue price.
+BILLING_OPTIONAL_COLUMNS: tuple[str, ...] = ("sku",)
+
 UTILIZATION_COLUMNS: tuple[str, ...] = (
     "timestamp",
     "resource_id",

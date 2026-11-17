@@ -3,7 +3,7 @@
 > Status key: `DONE` · `IN PROGRESS` · `PLANNED` · `BLOCKED`
 >
 > This plan follows the milestone order in `CloudPilot_AI_Full_Guide.md` §14.
-> Milestones 1–2 are implemented. Later milestones are deliberately not started
+> Milestones 1–3 are implemented. Later milestones are deliberately not started
 > until the previous one is reviewed and approved.
 
 ## 1. Guiding constraints
@@ -72,7 +72,7 @@ forced re-import reported `excluded_duplicate_rows=480` with unchanged totals.
 - Import rollback/void is not exposed. Imports are append-only for auditability.
 - Forecast and price ingestion are not implemented (Milestones 3–4).
 
-### Milestone 2 — Cost analytics — `DONE` (awaiting review)
+### Milestone 2 — Cost analytics — `DONE`
 
 Approved decisions before starting:
 
@@ -116,16 +116,71 @@ kept totals unchanged.
 - `usage_unit` is validated for shape, not against a per-service unit allowlist.
 - Import rollback/void is not exposed. Imports are append-only for auditability.
 
-### Milestone 3 — Resource analysis and savings scenarios — `PLANNED`
+### Milestone 3 — Resource analysis and savings scenarios — `DONE`
 
-- Utilization import is done; detection rules next.
-- Configurable idle rules with a minimum observation window.
-- Price catalogue with source URL, retrieval date, effective period.
-- Savings scenarios with baseline/proposed cost and explicit assumptions.
-- Every finding links to cost + metric evidence IDs.
+Decisions taken before implementation:
+
+| Decision | Choice |
+|---|---|
+| Idle rule | Maximum CPU p95 `< 15%` **and** maximum memory p95 `< 30%` |
+| Rightsize rule | Mean CPU `< 50%` **and** mean memory `< 70%` (evaluated only when not idle) |
+| Observation minimum | 14 distinct days and 24 samples; default cost window 30 days |
+| Minimum saving | `1.00` in the billing currency |
+| Price catalogue | `pricing/catalogue/demo_prices.csv`, every row sourced and flagged `is_synthetic=true` |
+| SKU linkage | Optional billing `sku` column; no SKU is inferred from resource names |
+| Rightsizing math | Catalogue list-price ratio for the same provider, region, currency and usage unit; no FX |
+| Currency policy | Findings are partitioned by currency; totals are never combined |
+
+| Task | Status |
+|---|---|
+| Optional `sku` column accepted with no `unexpected_column` warning | DONE |
+| `PriceEntry`, `AnalysisRun`, `Finding`, `SavingsScenario` tables + migration `0002` | DONE |
+| Idempotent catalogue loader with provenance and validation | DONE |
+| `GET /api/prices`, `GET /api/prices/{id}` | DONE |
+| `POST /api/analysis/run` | DONE |
+| `GET /api/findings` (latest run by default, or `run_id`) and `GET /api/findings/{id}` | DONE |
+| Evidence IDs, observation window, assumptions, warnings, confidence and risk | DONE |
+| Reproducible scenarios stored per finding | DONE |
+| Tests for rules, observation minimum, missing prices, idempotence, currency partitioning, reproducibility | DONE |
 
 **Exit check:** every finding links to evidence and every savings number is
 reproducible.
+Result: 58 tests pass; lint clean. On the SQLite sample, the API returns three
+findings (2 idle, 1 over-provisioned) with total savings USD `276.720019` for
+`2026-01-31..2026-03-01`. An independent `Decimal` read of
+`data/sample/billing_sample.csv` reproduced each baseline
+(`138.396963`, `138.563898`, `68.957640`), the rightsize proposal
+(`69.198482` = baseline × `0.096000 / 0.192000`) and the same total. Running the
+analysis twice creates a second immutable run with identical savings; the first
+run remains queryable by `run_id`. Migration `0002` passed
+`upgrade head -> downgrade base -> upgrade head`.
+
+The same flow was verified against PostgreSQL 16 in Docker Compose. The rebuilt
+image ran `alembic upgrade head` to `0002`; the seed script loaded 480 billing
+rows, 2,880 utilization rows and 4 synthetic prices. `POST /api/analysis/run`
+returned the identical three findings and USD `276.720019` total, with the same
+baselines (`138.396963`, `138.563898`, `68.957640`) and rightsize proposal
+(`69.198482`). The finding detail exposed 30 cost-record IDs, 720 metric IDs
+(truncated at 50), four assumptions, four warnings and both synthetic price
+entries. A second run reproduced the arithmetic as run 2 while run 1 remained
+queryable. Table counts confirmed 2 runs, 6 findings and 6 scenarios, then the
+stack and volume were removed with `docker compose down -v`.
+
+**Known limitations carried into Milestone 4**
+
+- Rules are deliberately simple threshold rules, not statistical anomaly
+  detection. Low utilization is a review signal, not proof of waste.
+- The shipped price catalogue is synthetic demo data. Real prices require a
+  sourced catalogue with real URLs and retrieval dates; the loader validates
+  shape, not vendor accuracy.
+- Rightsizing assumes the smaller SKU is suitable; performance, network and
+  storage requirements are not modelled.
+- Idle scenarios assume a full-window stop with zero replacement spend.
+- Only resources that appear in billing **and** have utilization in the window
+  are evaluated. There is no resource inventory or live discovery.
+- Catalogue prices are list prices; negotiated discounts and commitments are not
+  applied.
+- No approval workflow or export yet (Milestone 6).
 
 ### Milestone 4 — Forecasting — `PLANNED`
 
@@ -174,8 +229,13 @@ reproducible.
 | GET | `/api/costs/summary` | Spend totals by currency + data window |
 | GET | `/api/costs/breakdown` | Spend by dimension, largest first |
 | GET | `/api/costs/trends` | Daily/monthly series by currency |
+| POST | `/api/analysis/run` | Deterministic waste detection over a scope |
+| GET | `/api/findings` | Findings from the latest run (or `run_id`) |
+| GET | `/api/findings/{id}` | Finding detail, evidence and savings scenario |
+| GET | `/api/prices` | Sourced catalogue prices with provenance |
+| GET | `/api/prices/{id}` | One price entry and its source |
 
-The remaining endpoints from guide §11 (`/api/analysis/*`, `/api/findings/*`, …)
+The remaining endpoints from guide §11 (forecast, AI advisor, approvals, exports)
 arrive in their own milestones.
 
 ## 4. Key risks
@@ -200,5 +260,11 @@ arrive in their own milestones.
 4. **LLM provider:** local Ollama only, optional and disabled by default; no paid
    API.
 5. **Export priority:** Markdown + CSV first in Milestone 6, PDF later.
-
-No open questions block Milestone 3. New decisions will be recorded here.
+6. **Waste rules:** idle and rightsizing thresholds above; every threshold is a
+   setting (`CLOUDPILOT_IDLE_*`, `CLOUDPILOT_RIGHTSIZE_*`,
+   `CLOUDPILOT_MIN_OBSERVATION_DAYS`, `CLOUDPILOT_MIN_SAMPLES`,
+   `CLOUDPILOT_ANALYSIS_COST_DAYS`, `CLOUDPILOT_MIN_MONTHLY_SAVINGS`).
+7. **Synthetic catalogue:** the demo catalogue is labelled `is_synthetic=true`,
+   uses `example.invalid` source URLs and is never presented as a vendor quote.
+8. **No invented SKUs:** rightsizing requires an explicit billing `sku` and a
+   catalogue `replacement_sku`. Otherwise the resource is skipped and disclosed.

@@ -55,5 +55,31 @@ class TrendGranularity(StrEnum):
     MONTH = "month"
 
 
+class FindingType(StrEnum):
+    IDLE_RESOURCE = "idle_resource"
+    OVER_PROVISIONED = "over_provisioned"
+
+
+class FindingStatus(StrEnum):
+    OPEN = "open"
+
+
+class RiskLevel(StrEnum):
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"
+
+
+class ConfidenceLevel(StrEnum):
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"
+
+
+class ScenarioMethod(StrEnum):
+    STOP_RESOURCE = "stop_resource"
+    RIGHTSIZE_SKU = "rightsize_sku"
+
+
 PROVIDERS = frozenset(provider.value for provider in Provider)
 ENVIRONMENTS = frozenset(environment.value for environment in Environment)
