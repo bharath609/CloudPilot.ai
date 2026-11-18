@@ -4,17 +4,31 @@ from __future__ import annotations
 
 import logging
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, Request
 from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
 from sqlalchemy.engine import make_url
 
-from app.api.routes import analysis, costs, forecasts, health, imports, prices, reports
-from app.core.config import Settings, get_settings
+from app.api.routes import (
+    analysis,
+    costs,
+    decisions,
+    exports,
+    filters,
+    forecasts,
+    health,
+    imports,
+    prices,
+    reports,
+    resources,
+)
+from app.core.config import REPO_ROOT, Settings, get_settings
 from app.core.errors import AppError
 from app.db.base import Database
 
@@ -52,8 +66,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             database.dispose()
 
     app = FastAPI(
-        title=resolved.app_name,
-        version=resolved.app_version,
+        title=resolved.app_name,        version=resolved.app_version,
         summary="Local-first cloud cost analytics and optimization assistant",
         description=(
             "Ingests cloud billing and utilization CSV exports, validates them with "
@@ -63,6 +76,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         lifespan=lifespan,
     )
     app.state.settings = resolved
+    dist_dir = (
+        Path(resolved.frontend_dist_dir)
+        if resolved.frontend_dist_dir
+        else REPO_ROOT / "frontend" / "dist"
+    )
+    index_file = dist_dir / "index.html"
 
     if resolved.cors_origin_list:
         app.add_middleware(
@@ -93,7 +112,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         )
 
     @app.get("/", include_in_schema=False)
-    def root() -> dict[str, Any]:
+    def root() -> Any:
+        if index_file.is_file():
+            return FileResponse(index_file)
         return {
             "name": resolved.app_name,
             "version": resolved.app_version,
@@ -106,8 +127,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(costs.router, prefix=resolved.api_prefix)
     app.include_router(prices.router, prefix=resolved.api_prefix)
     app.include_router(analysis.router, prefix=resolved.api_prefix)
+    app.include_router(decisions.router, prefix=resolved.api_prefix)
+    app.include_router(resources.router, prefix=resolved.api_prefix)
+    app.include_router(filters.router, prefix=resolved.api_prefix)
     app.include_router(forecasts.router, prefix=resolved.api_prefix)
     app.include_router(reports.router, prefix=resolved.api_prefix)
+    app.include_router(exports.router, prefix=resolved.api_prefix)
+    if index_file.is_file():
+        app.mount("/", StaticFiles(directory=dist_dir, html=True), name="frontend")
     return app
 
 

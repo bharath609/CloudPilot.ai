@@ -120,6 +120,11 @@ class Settings(BaseSettings):
     llm_max_evidence_chars: int = Field(default=48_000, ge=8_000, le=200_000)
     llm_max_response_bytes: int = Field(default=200_000, ge=10_000, le=2_000_000)
 
+    # Frontend (Milestone 6) ------------------------------------------------
+    # Empty means "<repository>/frontend/dist" when that build exists. The API
+    # still works without any frontend build.
+    frontend_dist_dir: str = ""
+
     @property
     def cors_origin_list(self) -> list[str]:
         return [item.strip() for item in self.cors_origins.split(",") if item.strip()]

@@ -81,6 +81,14 @@ class ScenarioMethod(StrEnum):
     RIGHTSIZE_SKU = "rightsize_sku"
 
 
+class DecisionKind(StrEnum):
+    """A human reviewer's recorded response to one finding."""
+
+    APPROVE = "approve"
+    REJECT = "reject"
+    NEEDS_OWNER_REVIEW = "needs_owner_review"
+
+
 class ForecastMethod(StrEnum):
     """Transparent, deterministic baseline models only."""
 

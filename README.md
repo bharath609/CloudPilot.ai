@@ -4,13 +4,14 @@
 
 CloudPilot AI ingests cloud billing and utilization exports, validates them with
 row-level precision, stores exact-decimal records, and turns them into spend
-analytics, evidence-backed waste findings, reproducible savings scenarios and
-transparent spend forecasts. The AI advisor and the approval workflow arrive in
-later milestones.
+analytics, evidence-backed waste findings, reproducible savings scenarios,
+transparent spend forecasts and an optional, evidence-bounded AI explanation. The
+React dashboard puts the whole workflow — import, explore, review, decide and
+export — in one local browser session.
 
-> **Status: Milestones 1–4 (ingestion, cost analytics, waste detection and
-> forecasting) are complete.** The AI advisor, dashboard and approvals are
-> intentionally not built yet — see [Roadmap](#roadmap).
+> **Status: Milestones 1–6 (ingestion, cost analytics, waste detection,
+> forecasting, AI advisor and the dashboard/approval workflow) are complete.**
+> Release hardening lands in Milestone 7 — see [Roadmap](#roadmap).
 >
 > **All sample data and demo prices are synthetic.** The application holds no
 > cloud credentials and cannot create, resize, stop or delete any cloud resource.
@@ -49,8 +50,13 @@ will only ever explain numbers that deterministic code already computed.
 | Transparent baselines (seasonal naive, moving average) and empirical intervals | ✅ Milestone 4 |
 | Evidence-bounded AI advisor with typed output and strict local fallback | ✅ Milestone 5 |
 | Optional free OpenAI-compatible provider, disabled by default | ✅ Milestone 5 |
-| 111 automated tests | ✅ Milestones 1–5 |
-| React dashboard, exports, approvals | ⏳ Milestones 6–7 |
+| Eight-page React dashboard with filters, charts and sample-data badges | ✅ Milestone 6 |
+| Resource-health inventory with utilization, observation window and owner tags | ✅ Milestone 6 |
+| Append-only approve / reject / owner-review decisions and audit history | ✅ Milestone 6 |
+| Server-generated Excel-safe CSV findings export and Markdown report | ✅ Milestone 6 |
+| Data-freshness panel, filter discovery and optional static frontend serving | ✅ Milestone 6 |
+| 138 backend tests + 19 frontend tests | ✅ Milestones 1–6 |
+| CI, screenshots, release hardening | ⏳ Milestone 7 |
 
 ## Architecture
 
@@ -68,8 +74,9 @@ flowchart TD
   H --> J[Evidence package]
   I --> J
   J --> K[AI explanation only - M5]
-  K --> L[Human review and approval - M6]
-  L --> M[Report export - M6]
+  K --> L[React dashboard - M6]
+  L --> M[Human review decisions - M6]
+  M --> N[CSV / Markdown exports - M6]
 
   style B fill:#e8f5e9,stroke:#2e7d32
   style D fill:#e8f5e9,stroke:#2e7d32
@@ -81,9 +88,12 @@ flowchart TD
   style J fill:#e8f5e9,stroke:#2e7d32
   style K fill:#e8f5e9,stroke:#2e7d32
   style P fill:#e8f5e9,stroke:#2e7d32
+  style L fill:#e8f5e9,stroke:#2e7d32
+  style M fill:#e8f5e9,stroke:#2e7d32
+  style N fill:#e8f5e9,stroke:#2e7d32
 ```
 
-Green nodes are implemented through Milestone 5. Detailed design, decisions and
+Green nodes are implemented through Milestone 6. Detailed design, decisions and
 trade-offs: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
 ## Quick start
@@ -142,6 +152,53 @@ uvicorn app.main:app --reload
 
 Open <http://127.0.0.1:8000/docs>.
 
+### Dashboard (the browser workflow)
+
+The React dashboard lives in `frontend/`. It needs Node.js 20+ (verified with
+Node 24). Choose either mode:
+
+**Build once, then let FastAPI serve it** (one origin, no CORS or rewrite rules):
+
+```powershell
+# Windows PowerShell, from the repository root
+cd frontend
+npm install
+npm run build
+cd ..
+# restart the API, then open http://127.0.0.1:8000/
+```
+
+```bash
+# Linux / macOS, from the repository root
+cd frontend
+npm install
+npm run build
+cd ..
+# restart the API, then open http://127.0.0.1:8000/
+```
+
+`GET /` returns the built app when `frontend/dist/index.html` exists; otherwise it
+returns the API banner JSON. Set `CLOUDPILOT_FRONTEND_DIST_DIR` to serve a build
+from another path. The API and `/docs` keep working either way.
+
+**Develop with Vite** (hot reload; `/api` is proxied to `127.0.0.1:8000`):
+
+```powershell
+cd frontend
+npm install
+npm run dev
+# open http://127.0.0.1:5173
+```
+
+Frontend checks:
+
+```powershell
+cd frontend
+npm test        # Vitest + Testing Library
+npm run lint    # oxlint
+npm run build   # TypeScript project build + Vite bundle
+```
+
 If you prefer not to seed the database, upload the CSV files instead:
 
 ```powershell
@@ -178,7 +235,7 @@ curl -s http://127.0.0.1:8000/api/findings
 
 Configuration lives in `.env` (copy `.env.example`). No secrets are required.
 
-## API (Milestones 1–5)
+## API (Milestones 1–6)
 
 | Method | Endpoint | Purpose |
 |---|---|---|
@@ -203,6 +260,12 @@ Configuration lives in `.env` (copy `.env.example`). No secrets are required.
 | POST | `/api/reports/generate` | Generate an evidence-bound AI explanation, or the deterministic fallback |
 | GET | `/api/reports` | Paginated report history, newest first |
 | GET | `/api/reports/{id}` | One report with its validated output and exact evidence package |
+| GET | `/api/filters` | Distinct stored filter values, billing window, import freshness and synthetic-data flags |
+| GET | `/api/resources` | Read-only resource inventory with utilization, observation basis, owner tags and window cost |
+| POST | `/api/findings/{id}/decision` | Append an approve / reject / needs-owner-review decision |
+| GET | `/api/decisions` | Cross-finding decision audit trail, newest first (`?finding_id=` for one finding) |
+| GET | `/api/exports/findings.csv` | Excel-formula-sanitized CSV of findings plus each latest decision |
+| GET | `/api/exports/summary.md` | Markdown report with totals, decisions, forecast, lineage and synthetic notice |
 
 All three cost endpoints accept `start`, `end`, `currency`, `provider`,
 `account_id`, `service`, `region`, `environment` and `project`. `breakdown` adds
@@ -421,6 +484,54 @@ leave the machine, so any explanation can be audited or rejected. The SHA-256 in
 `evidence_sha256` is over the canonical serialized package. The advisor never
 changes findings, totals, prices or forecasts; those remain deterministic records.
 
+### Review decisions, resource health, filters and exports
+
+`GET /api/filters` reads only stored rows: distinct providers, services, regions,
+environments, projects and accounts, the first and last billing dates, the import
+count, the newest import filename/time, whether any import came from the sample
+seed and how many synthetic prices are loaded. The dashboard uses it for filter
+options, the freshness panel and the sample-data banner.
+
+`GET /api/resources` is a **read-only** utilization inventory. It lists only
+resources that appear in both billing and utilization data, and returns the
+observation window, sample count, CPU/memory average and p95 max, owner/team tags,
+the de-duplicated spend in the window and the same thresholds the analysis engine
+uses. `idle_candidate` and `rightsize_candidate` are pre-checks for exploration —
+**they are not findings** and never affect savings. Only `POST /api/analysis/run`
+creates findings.
+
+`POST /api/findings/{id}/decision` appends one decision (`approve`, `reject` or
+`needs_owner_review`) with a self-declared `actor` label and an optional note.
+Decisions are **append-only**: a finding keeps its original savings estimate, and
+a second decision supersedes the first only in the "latest" view. `GET /api/decisions`
+returns the audit trail newest first, optionally filtered by `decision` or
+`finding_id`, with enough finding context to read without a join. There is no
+authentication in this build, so the label is not a verified identity.
+
+`GET /api/exports/findings.csv` returns one row per finding and currency with
+baseline, proposed, savings, risk, confidence, evidence counts and the latest
+decision. Every cell that begins with `=`, `+`, `-`, `@`, tab or carriage return is
+prefixed so spreadsheet software cannot treat it as a formula. Both export
+endpoints send `Content-Disposition: attachment` and `X-Content-Type-Options: nosniff`.
+
+`GET /api/exports/summary.md` returns a Markdown report with per-currency totals,
+the findings table, decisions, the newest forecast, data lineage and an explicit
+synthetic-data notice. Both exports accept `run_id`; the report also accepts
+`forecast_run_id`.
+
+Example decision response (`201 Created`):
+
+```json
+{
+  "id": 1,
+  "finding_id": 1,
+  "decision": "approve",
+  "actor": "alice@example.test",
+  "note": "Verified with the owner.",
+  "created_at": "2026-03-01T13:00:00Z"
+}
+```
+
 Example upload response (abridged):
 
 ```json
@@ -514,36 +625,73 @@ retained in raw row data but ignored by analysis.
 
 ```powershell
 cd backend
-..\.venv\Scripts\python.exe -m pytest
+..\.venv\Scripts\python.exe -m pytest -o addopts="" -q
 ..\.venv\Scripts\ruff.exe check .
 ```
 
-Actual result on this machine (Python 3.14.7, 17 Nov 2026):
-
-```text
-111 passed, 1 warning in 69.85s
-All checks passed!
+```powershell
+cd frontend
+npm test          # Vitest + Testing Library (jsdom)
+npm run typecheck
+npm run lint      # oxlint
+npm run build     # TypeScript project build + Vite bundle
 ```
 
-The single warning is an upstream Starlette notice that `httpx` should be
-replaced by `httpx2`; it is not from this project. Coverage includes exact
-totals against a hand-read CSV fixture, malformed encodings, NUL bytes, oversized
-uploads, duplicate headers, missing columns, row limits, duplicate detection,
-account masking, strict mode, pagination, transaction integrity,
-hand-calculated analytics totals with per-currency shares and de-duplication,
-catalogue idempotence and provenance, optional SKU ingestion, idle and
-rightsizing rules, observation minimums, missing-price behaviour, currency
+Actual result on this machine (Python 3.14.7 / Node 24.21.0, 18 Nov 2026):
+
+```text
+138 passed, 1 warning in 148.18s
+All checks passed!
+
+ Test Files  4 passed (4)
+      Tests  19 passed (19)
+```
+
+The single backend warning is an upstream Starlette notice that `httpx` should be
+replaced by `httpx2`; it is not from this project. `npm run lint` exits 0 with
+warnings about fast-refresh boundaries in the context provider and a
+`set-state-in-effect` hint in `AppState.tsx`; both are intentional and documented
+in the code. `npm run build` warns that the Recharts chunk exceeds 500 kB; the
+bundle is still well under 1 MB uncompressed.
+
+Coverage includes exact totals against a hand-read CSV fixture, malformed
+encodings, NUL bytes, oversized uploads, duplicate headers, missing columns, row
+limits, duplicate detection, account masking, strict mode, pagination, transaction
+integrity, hand-calculated analytics totals with per-currency shares and
+de-duplication, catalogue idempotence and provenance, optional SKU ingestion, idle
+and rightsizing rules, observation minimums, missing-price behaviour, currency
 partitioning of savings, evidence links, reproducibility across runs, exact
 seasonal-naive and moving-average forecasts, held-out MAE/RMSE/bias/MAPE,
 zero-actual MAPE exclusions, empirical interval widths, insufficient-history
-rejection, scope filters, currency separation and querying older runs. Milestone
-5 adds disabled-by-default fallback, accepted AI output built from the real
-package, unknown finding/evidence IDs, invented amounts, percentages and
+rejection, scope filters, currency separation and querying older runs.
+
+Milestone 5 adds disabled-by-default fallback, accepted AI output built from the
+real package, unknown finding/evidence IDs, invented amounts, percentages and
 magnitude words, missing priority findings, `human_review_required=false`,
 invalid JSON, provider errors, timeouts, missing keys, prompt-injection redaction,
 email/long-digit masking, package bounding, SHA-256 reproducibility, list/detail/
 404 behaviour, HTTPS enforcement, localhost-only HTTP, retry/backoff bounds,
 response-size caps and malformed provider payloads.
+
+Milestone 6 adds append-only decision recording (including a second decision
+superseding the first without erasing it), unknown-finding 404s, decision
+validation and pagination, the latest-decision join on findings, the resource
+inventory aggregate and de-duplicated window cost, filter discovery and freshness
+fields, CSV formula sanitization, the Markdown report contents, attachment/nosniff
+headers, and optional static frontend serving (absent build, present build, custom
+directory). Frontend tests cover exact decimal formatting and BigInt arithmetic,
+the API client's error envelope and multipart upload, the full overview render from
+API fixtures, and the append-only decision form round-trip.
+
+The M6 live smoke test (`23` assertions) ran against a seeded temporary SQLite
+database with the built frontend served from the API origin on `127.0.0.1:8123`.
+It verified `/` HTML and the JS asset, `/api/filters`, the exact USD total
+`1531.305850`, four resource-health rows, three findings whose savings sum to
+`276.720019`, a `201` decision that then appeared on the finding and in
+`/api/decisions`, a forecast total of `765.016323`, a deterministic advisor report
+with `fallback_reason=disabled`, and both exports (three CSV rows with the decision
+columns, and a Markdown report containing totals, decisions, forecast, lineage and
+the synthetic-data notice).
 
 ### Container path verified
 
@@ -611,6 +759,49 @@ were then removed with `docker compose down -v`.
 
 ## 5-minute demo
 
+### Browser workflow (the recruiter path)
+
+1. Build the dashboard once (`cd frontend; npm install; npm run build`), start the
+   API from `backend/` and open <http://127.0.0.1:8000/>. The header shows
+   **API connected**.
+2. The overview shows the synthetic-data banner, exact spend
+   (`1,531.31 USD` for `2026-01-01..2026-03-01`), a daily chart, top services,
+   the latest findings, the forecast snapshot, and freshness facts taken from
+   `/api/filters` (last import file, last billing date, 4 synthetic prices).
+3. **Imports** → upload `data/sample/billing_sample.csv` and
+   `data/sample/utilization_sample.csv`. Each returns a status badge, SHA-256,
+   accepted/rejected counts and row-level issues. The history table is labelled
+   `sample`.
+4. **Cost Explorer** → narrow by provider, service, project, region,
+   environment or date. Totals, window and duplicate counts update; the tooltip
+   shows the exact stored decimal while the chart axis is labelled approximate.
+   Switch grouping between service, project, region, environment, provider,
+   account and resource.
+5. **Resource Health** → see the four observed resources with CPU/memory average
+   and p95 max, observation days, owner/team tags, window cost and the idle or
+   rightsize pre-check badges. The thresholds used are printed under the table.
+6. **Findings** → click **Run analysis**. Three findings appear, each with
+   baseline, proposed cost, exact monthly savings, evidence and price provenance.
+   The savings strip sums to `276.72 USD`.
+7. On a finding, record a decision (approve / reject / needs owner review) with a
+   reviewer label and note. The chip changes to the newest decision and the
+   append-only warning stays visible. Record a second, different decision to show
+   history is kept.
+8. **AI Advisor** → generate a report with the advisor disabled. The report is
+   marked **deterministic fallback** (`disabled`), lists priority findings and
+   evidence IDs, and keeps `human_review_required: true`. Enable a free provider
+   in `.env` to compare.
+9. **Forecasts** → run the default seasonal-naive forecast. The projected total
+   is `765.02 USD` with an empirical band, held-out MAE/RMSE/bias/MAPE and a
+   confidence label. Try the moving-average method for a flatter projection.
+10. **Audit** → see every decision and advisor report with reviewer, note, risk,
+    cost window and evidence hash. Use **Export CSV** and **Export report** in the
+    header to download the findings CSV and the Markdown summary.
+
+Nothing is applied to any cloud account; decisions are local records only.
+
+### API walkthrough (same data, no browser)
+
 1. Start the API and open <http://127.0.0.1:8000/docs>.
 2. Upload `data/sample/billing_sample.csv`; note `status=valid`, 480 rows,
    a single currency (`USD`), the data window and the optional `sku` values.
@@ -627,33 +818,41 @@ were then removed with `docker compose down -v`.
    assume a full-window stop.
 7. Run the analysis again and compare: a new immutable run has identical
    arithmetic, while `GET /api/findings?run_id=1` still returns the first run.
-8. `POST /api/forecasts/run` with `{}`. The sample returns one USD series over
+8. `POST /api/findings/1/decision` with
+   `{"decision":"approve","actor":"you","note":"Reviewed"}`; then open
+   `/api/decisions` and `/api/findings` to see the latest decision attached.
+9. `GET /api/resources?currency=USD` for the utilization inventory and
+   `GET /api/filters` for the window and freshness fields.
+10. `POST /api/forecasts/run` with `{}`. The sample returns one USD series over
    `2026-03-02..2026-03-31` with projected spend `765.016323`, plus MAE, RMSE,
    bias, MAPE, an empirical interval and `medium` confidence. Note that all 14
    holdout days were predicted without their actual values.
-9. Re-run with `{"method":"moving_average","horizon_days":7}` and compare the
+11. Re-run with `{"method":"moving_average","horizon_days":7}` and compare the
    flat forecast and its wider error metrics; both runs stay queryable.
-10. `POST /api/reports/generate` with `{}` while the advisor is disabled. Show the
-    `fallback`/`deterministic` report, three priority findings, the unchanged USD
-    `276.720019`, and the `disabled` reason. Open `/api/reports/1` and note that
-    the stored evidence contains no raw CSV rows or tags.
-11. Optional: set `CLOUDPILOT_LLM_ENABLED=true` plus a free provider's base URL,
-    model and key in `.env`, restart, and generate again. The report becomes
-    `completed`/`llm` only if the answer passes schema, evidence-ID and numeric
-    validation; otherwise the deterministic fallback is stored with a reason.
-12. Upload `data/sample/billing_row_errors.csv`; show `status=partial` and open
-    `/api/imports/{id}/errors` to inspect the precise row/column errors.
-13. Upload `data/sample/billing_missing_column.csv`; show `status=invalid` and
-    that `/records` is empty.
-14. Upload the billing file again; show the `409 duplicate_import` with the
-    original import ID. Retry with `?force=true` to see overlap warnings.
-15. Open `/api/costs/summary`: USD `1531.305850` over 480 rows for
-    `2026-01-01..2026-03-01`. The same total comes from a plain `Decimal` read of
-    the CSV, not from the database path.
-16. Open `/api/costs/breakdown?dimension=service&limit=5` and
-    `/api/costs/trends?granularity=month`; shares are percentages of one currency
-    and the three monthly buckets add back to the same total.
-17. Run the tests and show the green output above.
+12. `POST /api/reports/generate` with `{}` while the advisor is disabled. Show the
+   `fallback`/`deterministic` report, three priority findings, the unchanged USD
+   `276.720019`, and the `disabled` reason. Open `/api/reports/1` and note that
+   the stored evidence contains no raw CSV rows or tags.
+13. Optional: set `CLOUDPILOT_LLM_ENABLED=true` plus a free provider's base URL,
+   model and key in `.env`, restart, and generate again. The report becomes
+   `completed`/`llm` only if the answer passes schema, evidence-ID and numeric
+   validation; otherwise the deterministic fallback is stored with a reason.
+14. `GET /api/exports/findings.csv` and `GET /api/exports/summary.md`; confirm the
+   CSV decision columns, the Markdown totals/decisions/forecast/lineage, and the
+   synthetic-data notice.
+15. Upload `data/sample/billing_row_errors.csv`; show `status=partial` and open
+   `/api/imports/{id}/errors` to inspect the precise row/column errors.
+16. Upload `data/sample/billing_missing_column.csv`; show `status=invalid` and
+   that `/records` is empty.
+17. Upload the billing file again; show the `409 duplicate_import` with the
+   original import ID. Retry with `?force=true` to see overlap warnings.
+18. Open `/api/costs/summary`: USD `1531.305850` over 480 rows for
+   `2026-01-01..2026-03-01`. The same total comes from a plain `Decimal` read of
+   the CSV, not from the database path.
+19. Open `/api/costs/breakdown?dimension=service&limit=5` and
+   `/api/costs/trends?granularity=month`; shares are percentages of one currency
+   and the three monthly buckets add back to the same total.
+20. Run the tests and show the green output above.
 
 All findings, prices, forecasts and reports in this demo are synthetic. The
 advisor is disabled by default; when enabled it explains the computed evidence but
@@ -665,8 +864,9 @@ never changes a total or performs a cloud action.
 CloudPilot AI/
 ├── backend/
 │   ├── app/
-│   │   ├── main.py                 # app factory, lifespan, error envelope
-│   │   ├── api/{deps.py,routes/}   # health, import and cost endpoints
+│   │   ├── main.py                 # app factory, lifespan, error envelope, optional SPA
+│   │   ├── api/{deps.py,routes/}   # health, imports, costs, analysis, forecasts, reports,
+│   │   │                           # decisions, resources, filters, exports
 │   │   ├── core/                   # settings, enums, errors, UTC helpers
 │   │   ├── db/                     # engine, exact decimal types, ORM models
 │   │   ├── llm/                    # OpenAI-compatible client + evidence-bound prompts
@@ -678,10 +878,26 @@ CloudPilot AI/
 │   │       ├── analysis.py         # idle/rightsize rules + evidence/scenarios
 │   │       ├── forecasting.py      # seasonal-naive / moving-average + holdout evaluation
 │   │       ├── advisor.py          # evidence package, redaction, validation, fallback
+│   │       ├── decisions.py        # append-only finding decisions + latest lookup
+│   │       ├── resources.py        # read-only utilization inventory aggregate
+│   │       ├── filters.py          # filter discovery, window and freshness facts
+│   │       ├── exports.py          # Excel-safe CSV + Markdown report
 │   │       └── prices.py           # catalogue loader, provenance, exact lookup
-│   ├── alembic/                    # migrations 0001–0004 (advisor reports)
-│   ├── tests/                      # 111 pytest tests
+│   ├── alembic/                    # migrations 0001–0005 (decisions)
+│   ├── tests/                      # 138 pytest tests
 │   └── pyproject.toml
+├── frontend/
+│   ├── src/
+│   │   ├── App.tsx                 # HashRouter and the eight routes
+│   │   ├── api/                    # typed client, abortable query/action hooks, types
+│   │   ├── components/             # layout, UI primitives, Recharts wrappers
+│   │   ├── lib/money.ts            # BigInt exact formatting; floats only for charts
+│   │   ├── pages/                  # overview, costs, resources, findings, advisor,
+│   │   │                           # forecasts, imports, audit
+│   │   ├── state/AppState.tsx      # health, filters and display currency
+│   │   └── styles.css              # hand-written dark FinOps design system
+│   ├── vite.config.ts              # /api dev proxy + Vitest jsdom config
+│   └── package.json
 ├── data/
 │   ├── sample/                     # synthetic valid + malformed CSVs
 │   ├── schemas/                    # CSV JSON contracts
@@ -713,7 +929,7 @@ CloudPilot AI/
 | ✅ **M3** | Idle/over-provisioned detection rules, sourced price catalogue, savings scenarios | Every finding links to evidence; every saving is reproducible |
 | ✅ **M4** | Transparent forecasting with train/test split and error metrics | Forecast reproducible and evaluated |
 | ✅ **M5** | Evidence-bounded AI advisor on a free OpenAI-compatible API (Groq default; Gemini/OpenRouter/Ollama interchangeable), typed output, injection tests | AI explains without inventing prices or changing totals |
-| **M6** | React dashboard, filters, sample-data badge, approvals, exports | Full workflow in the browser |
+| ✅ **M6** | React dashboard, filters, sample-data badge, append-only approvals, server exports | Full workflow in the browser |
 | **M7** | CI, release hardening, screenshots, `v1.0.0` | `docker compose up --build` demo passes from scratch |
 
 Details and open questions: [`docs/IMPLEMENTATION_PLAN.md`](docs/IMPLEMENTATION_PLAN.md).
@@ -731,12 +947,22 @@ Details and open questions: [`docs/IMPLEMENTATION_PLAN.md`](docs/IMPLEMENTATION_
 - The advisor is disabled by default. When enabled it requires HTTPS (HTTP only
   on localhost), keeps the API key in memory as `SecretStr`, never logs or stores
   it, and falls back deterministically on any provider or validation failure.
+- Exports are generated server-side from stored records. CSV cells that begin with
+  `=`, `+`, `-`, `@`, tab or carriage return are prefixed to prevent spreadsheet
+  formula injection, and both downloads are sent as attachments with
+  `X-Content-Type-Options: nosniff`.
+- Decisions are append-only. A finding's savings estimate is never mutated, and
+  the reviewer label is stored verbatim as a self-declared field, not as an
+  identity.
+- The dashboard is static files served from the same local origin. It makes no
+  third-party requests, has no analytics or telemetry, and uses a hash router so
+  no catch-all server rewrite is required.
 - The API has **no authentication** and binds locally. Do not expose it to a
   network until M7 hardening lands.
 
 Full STRIDE-style analysis: [`docs/THREAT_MODEL.md`](docs/THREAT_MODEL.md).
 
-## Known limitations (Milestones 1–5)
+## Known limitations (Milestones 1–6)
 
 - Analytics are read-only and computed on demand; there is no materialized cache.
   Fine at local sample sizes, but large exports will need pre-aggregation.
@@ -748,8 +974,8 @@ Full STRIDE-style analysis: [`docs/THREAT_MODEL.md`](docs/THREAT_MODEL.md).
   more than `limit` items in total.
 - Shares are rounded to three decimal places per row; they may not sum to exactly
   `100.000` when many small groups exist.
-- No authentication, rate limiting or TLS.
-- No UI yet; use `/docs` or `curl`.
+- No authentication, rate limiting or TLS. The dashboard has no login screen, and
+  reviewer labels in decisions are self-declared.
 - Imports are append-only; there is no rollback/delete endpoint.
 - `usage_unit` is shape-checked, not validated against a per-service allowlist.
 - Utilization metrics reference billing resources by string ID; there is no
@@ -764,8 +990,9 @@ Full STRIDE-style analysis: [`docs/THREAT_MODEL.md`](docs/THREAT_MODEL.md).
 - Idle scenarios assume a full-window stop with no replacement spend.
 - Only resources present in billing **and** with utilization in the window are
   evaluated. Missing SKUs/prices produce no finding and are disclosed.
-- Findings are immutable audit records; there is no edit, acknowledge or approval
-  endpoint yet (Milestone 6).
+- Findings are immutable audit records. M6 adds append-only decisions, but a
+  finding's amounts, evidence and status cannot be edited or deleted; a later
+  analysis run supersedes a run rather than mutating it.
 - Forecasts are deliberately simple baselines: seasonal naive and moving average.
   There is no regression, ARIMA, holiday calendar, growth trend or exogenous
   driver, so structural changes in spend are not anticipated.
@@ -798,12 +1025,27 @@ Full STRIDE-style analysis: [`docs/THREAT_MODEL.md`](docs/THREAT_MODEL.md).
   findings are omitted first; the report discloses the omission and the exact
   included package is stored.
 - Reports cover the newest analysis/forecast runs unless explicit run IDs are
-  supplied. They are immutable snapshots with no delete, approval or export
-  endpoint yet (Milestone 6).
+  supplied. They are immutable snapshots with no delete or in-place edit; the
+  Markdown summary export includes the newest report metadata but does not embed
+  the full report body.
 - The model is asked for JSON and JSON mode is requested where supported, but the
   schema itself is enforced client-side after the response arrives. There is no
   streaming, no token accounting and no cost/billing estimate for provider usage.
 - Prompts are English-only; explanations inherit the model's language and style.
+- The dashboard is a single-page app with no server-side rendering and no
+  role-based views. It renders what the API returns; users cannot edit imported
+  rows, findings or reports.
+- Pagination in the tables is page-size based (default 50) with no infinite scroll
+  or column sorting; use the API for larger scopes.
+- Decisions are append-only but have no workflow state machine, notifications,
+  attachments or owner assignment. `needs_owner_review` is a label, not an
+  integration.
+- CSV export is one row per finding per currency and includes the latest decision
+  only; the full decision history is available from `/api/decisions`.
+- The static frontend is served only when `frontend/dist/index.html` exists. There
+  is no asset cache busting beyond Vite's content hashes and no service worker.
+- The frontend bundle is a single ~759 kB chunk (Recharts dominates). It is fine
+  for a local demo but would benefit from route-level code splitting.
 - SQLite is fine for one local user; PostgreSQL is recommended for concurrency.
 - The container image runs on Python 3.12 while local development used 3.14.7;
   both pass the same HTTP checks, but the test suite is executed on the host.

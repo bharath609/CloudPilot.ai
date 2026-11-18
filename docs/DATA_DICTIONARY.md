@@ -1,9 +1,10 @@
 # CloudPilot AI — Data Dictionary
 
-Version 1.3 — covers Milestones 1–5 (imports, cost records, utilization
+Version 1.4 — covers Milestones 1–6 (imports, cost records, utilization
 metrics, validation issues, price catalogue, analysis runs, findings, savings
-scenarios, forecasts and advisor reports). Money fields are `decimal.Decimal` in
-Python and stored exactly as scaled integers (see §5). All timestamps are UTC.
+scenarios, forecasts, advisor reports and review decisions). Money fields are
+`decimal.Decimal` in Python and stored exactly as scaled integers (see §5). All
+timestamps are UTC.
 
 ---
 
@@ -90,6 +91,7 @@ owner review.
 | `ScenarioMethod` | `stop_resource`, `rightsize_sku` |
 | `ForecastMethod` | `seasonal_naive`, `moving_average` |
 | `ForecastGranularity` | `day` |
+| `DecisionKind` | `approve`, `reject`, `needs_owner_review` |
 | `ValidationCode` | see §6 |
 
 ---
@@ -353,6 +355,25 @@ No money column exists in this table: amounts inside `evidence`/`output` are
 mirrored strings from the deterministic records, so the advisor cannot introduce
 or alter a stored cost.
 
+### 4.12 `finding_decisions`
+
+Append-only human review records. One row per `POST /api/findings/{id}/decision`.
+A finding may have many decisions; the newest is shown in the API and UI, but all
+rows remain queryable. Nothing here mutates `findings` or `savings_scenarios`.
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | integer PK | |
+| `finding_id` | FK → `findings.id` | `ON DELETE CASCADE`; indexed |
+| `decision` | enum text | `approve`, `reject`, `needs_owner_review` |
+| `actor` | varchar(80) | Self-declared reviewer label; no authentication |
+| `note` | varchar(500), null | Optional rationale |
+| `created_at` | timestamptz | Indexed with `finding_id` for the latest lookup |
+
+Constraints: `decision` is constrained to the enum values, `actor` is non-empty,
+and rows are never updated or deleted by the application. The table has no money
+columns; audit rows join the immutable finding for amount and context.
+
 ---
 
 ## 5. Exact money storage (ADR-002)
@@ -539,6 +560,58 @@ Fallback reason codes:
 
 The fallback output is generated locally from the same package, always sets
 `human_review_required=true`, and states that no cloud action was taken.
+
+### 5.5 Dashboard response fields (Milestone 6)
+
+**`GET /api/findings` — nested `decision`**
+
+| Field | Type | Meaning |
+|---|---|---|
+| `decision` | object or null | Newest decision for this finding, or `null` if none |
+| `decision.id` | integer | Decision row ID |
+| `decision.decision` | enum | `approve` / `reject` / `needs_owner_review` |
+| `decision.actor` | string | Self-declared reviewer label |
+| `decision.note` | string or null | Optional rationale |
+| `decision.created_at` | ISO timestamp | UTC, `Z`-suffixed |
+
+**`POST /api/findings/{id}/decision`** accepts `{decision, actor, note?}` with
+`extra="forbid"`, returns `201` and the created record. An unknown finding is
+`404 finding_not_found`; an invalid enum or empty actor is `422`.
+
+**`GET /api/resources`**
+
+| Field | Type | Meaning |
+|---|---|---|
+| `window.start` / `.end` / `.days` | date / integer | Utilization window actually observed |
+| `items[].resource_id` | string | Billing resource key |
+| `items[].owner` / `.team` | string or null | From stored tags; may be absent |
+| `items[].window_cost` / `.currency` | decimal string / ISO code, or null | De-duplicated spend in the window; no FX |
+| `items[].observation_days` / `.sample_count` | integer | Coverage basis |
+| `items[].cpu_avg_pct`, `cpu_p95_max_pct`, `memory_avg_pct`, `memory_p95_max_pct` | decimal string | Percentages, 3 dp |
+| `items[].idle_candidate` / `.rightsize_candidate` | boolean | Threshold **pre-checks**, not findings |
+| `items[].warnings` | string[] | Coverage or tag warnings |
+| `thresholds` | object | The exact rule values applied |
+| `contains_sample_data` | boolean | Any contributing import came from the sample seed |
+
+**`GET /api/filters`**
+
+| Field | Type | Meaning |
+|---|---|---|
+| `window_start` / `window_end` / `day_count` | date / integer, null | Billing window from stored rows |
+| `currencies`, `providers`, `services`, `regions`, `environments`, `projects`, `accounts` | string[] | Distinct stored values |
+| `import_count` | integer | Total import attempts |
+| `last_import_at` / `last_import_filename` | timestamp / string, null | Newest import, regardless of kind |
+| `last_billing_date` | date, null | Newest stored usage date |
+| `contains_sample_data` | boolean | `source="sample"` present |
+| `synthetic_price_count` | integer | Catalogue rows with `is_synthetic=true` |
+| `notes` | string[] | Lineage and synthetic-data warnings |
+
+**Exports**
+
+| Endpoint | Format | Guarantees |
+|---|---|---|
+| `/api/exports/findings.csv` | UTF-8 CSV, one row per finding per currency | Formula-leading cells (`= + - @`, tab, CR) prefixed with `'`; latest decision columns; `Content-Disposition: attachment`; `nosniff` |
+| `/api/exports/summary.md` | UTF-8 Markdown | Per-currency totals, findings, decisions, newest forecast, data lineage, synthetic-data and no-action notices |
 
 ---
 

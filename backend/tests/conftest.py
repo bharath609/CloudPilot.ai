@@ -25,6 +25,8 @@ def settings(tmp_path: Path) -> Settings:
         max_rows=10_000,
         strict_imports=False,
         log_level="WARNING",
+        # Keep tests independent of whether `frontend/dist` has been built.
+        frontend_dist_dir=str(tmp_path / "no-frontend-build"),
     )
 
 

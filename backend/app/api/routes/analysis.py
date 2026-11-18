@@ -12,7 +12,7 @@ from app.api.deps import get_app_settings, get_db
 from app.core.config import Settings
 from app.core.enums import FindingStatus, FindingType
 from app.core.errors import NotFoundError
-from app.db.models import AnalysisRun, Finding, SavingsScenario
+from app.db.models import AnalysisRun, Finding, FindingDecision, SavingsScenario
 from app.schemas.analysis import (
     AnalysisRunResult,
     AnalysisRunSummary,
@@ -21,7 +21,9 @@ from app.schemas.analysis import (
     FindingOut,
     SavingsScenarioOut,
 )
+from app.schemas.decisions import FindingDecisionOut
 from app.services.analysis import AnalysisOutcome, AnalysisScope, run_analysis
+from app.services.decisions import latest_for
 
 router = APIRouter(tags=["analysis"])
 
@@ -86,9 +88,12 @@ def list_findings(
         )
     )
     scenarios = _scenarios_for(db, [row.id for row in rows])
+    decisions = latest_for(db, [row.id for row in rows])
     return FindingListResponse(
         run=AnalysisRunSummary.model_validate(run),
-        items=[_finding_out(row, scenarios.get(row.id)) for row in rows],
+        items=[
+            _finding_out(row, scenarios.get(row.id), decisions.get(row.id)) for row in rows
+        ],
         total=total,
         limit=page_size,
         offset=offset,
@@ -101,7 +106,8 @@ def get_finding(finding_id: int, db: Session = Depends(get_db)) -> FindingOut:
     if finding is None:
         raise NotFoundError(f"Finding {finding_id} was not found.")
     scenario = db.scalar(select(SavingsScenario).where(SavingsScenario.finding_id == finding.id))
-    return _finding_out(finding, scenario)
+    decision = latest_for(db, [finding.id]).get(finding.id)
+    return _finding_out(finding, scenario, decision)
 
 
 # -- helpers --------------------------------------------------------------
@@ -109,15 +115,21 @@ def _result(outcome: AnalysisOutcome) -> AnalysisRunResult:
     return AnalysisRunResult(
         run=AnalysisRunSummary.model_validate(outcome.run),
         findings=[
-            _finding_out(bundle.finding, bundle.scenario) for bundle in outcome.bundles
+            _finding_out(bundle.finding, bundle.scenario, None) for bundle in outcome.bundles
         ],
     )
 
 
-def _finding_out(finding: Finding, scenario: SavingsScenario | None) -> FindingOut:
+def _finding_out(
+    finding: Finding,
+    scenario: SavingsScenario | None,
+    decision: FindingDecision | None,
+) -> FindingOut:
     item = FindingOut.model_validate(finding)
     if scenario is not None:
         item.scenario = SavingsScenarioOut.model_validate(scenario)
+    if decision is not None:
+        item.decision = FindingDecisionOut.model_validate(decision)
     return item
 
 

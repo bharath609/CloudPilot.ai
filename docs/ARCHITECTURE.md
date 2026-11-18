@@ -26,28 +26,30 @@ flowchart TD
   H --> J[Evidence package]
   I --> J
   J --> K[AI explanation and prioritization]
-  K --> L[(PostgreSQL)]
+  K --> L[(PostgreSQL or SQLite)]
   L --> M[React dashboard]
-  M --> N[Human review and approval]
-  N --> O[Report export]
+  M --> N[Append-only human decisions]
+  N --> O[Server-generated CSV / Markdown exports]
 ```
 
-Milestones 1–5 implement the left-hand slice plus deterministic analysis:
-upload → validation → normalization → persistence → cost analytics → waste
-detection and savings scenarios → spend forecasting → evidence-bound
-explanation. The dashboard, approvals and exports remain planned.
+Milestones 1–6 implement the full left-to-right slice: upload → validation →
+normalization → persistence → cost analytics → waste detection and savings
+scenarios → spend forecasting → evidence-bound explanation → dashboard →
+append-only decisions → exports. Milestone 7 is release hardening only.
 
 ## 3. Current repository layout
 
 ```text
 CloudPilot AI/
 ├── backend/
-│   ├── alembic/                 # migrations 0001–0004 (advisor reports)
+│   ├── alembic/                 # migrations 0001–0005 (review decisions)
 │   ├── app/
-│   │   ├── main.py              # app factory, lifespan, exception handlers
-│   │   ├── api/routes/          # health, imports, costs, prices, analysis, forecasts, reports
+│   │   ├── main.py              # app factory, lifespan, handlers, optional SPA mount
+│   │   ├── api/routes/          # health, imports, costs, prices, analysis, forecasts,
+│   │   │                        # reports, decisions, resources, filters, exports
 │   │   ├── core/
 │   │   │   ├── config.py        # typed settings (pydantic-settings)
+│   │   │   ├── enums.py         # shared enums (finding type, decision kind, risk)
 │   │   │   ├── errors.py        # AppError taxonomy + error envelope
 │   │   │   └── time.py          # UTC helpers
 │   │   ├── db/
@@ -61,11 +63,27 @@ CloudPilot AI/
 │   │   ├── services/analysis.py  # idle/rightsize rules, evidence, scenarios
 │   │   ├── services/forecasting.py # daily baselines, holdout metrics, intervals
 │   │   ├── services/advisor.py   # package, redaction, validation, fallback
+│   │   ├── services/decisions.py # append-only decisions + latest lookup
+│   │   ├── services/resources.py # utilization inventory aggregate
+│   │   ├── services/filters.py   # filter discovery + freshness
+│   │   ├── services/exports.py   # Excel-safe CSV + Markdown report
 │   │   ├── services/prices.py    # catalogue loader, provenance, lookup
 │   │   ├── services/ingestion/  # csv_reader, validators, billing, utilization
 │   │   └── services/imports/    # import orchestration + queries
 │   ├── tests/                   # pytest suite + fixtures
 │   └── pyproject.toml
+├── frontend/
+│   ├── src/
+│   │   ├── App.tsx              # HashRouter + eight routes
+│   │   ├── api/                 # typed client, abortable query/action hooks, types
+│   │   ├── components/          # Layout, UI primitives, Recharts wrappers
+│   │   ├── lib/money.ts         # BigInt exact formatting; floats only for charts
+│   │   ├── pages/               # overview, costs, resources, findings, advisor,
+│   │   │                        # forecasts, imports, audit
+│   │   ├── state/AppState.tsx   # health, filters, display currency
+│   │   └── styles.css           # hand-written design system
+│   ├── vite.config.ts           # /api dev proxy + Vitest jsdom config
+│   └── package.json
 ├── data/
 │   ├── sample/                  # synthetic valid + deliberately invalid CSVs
 │   ├── schemas/                 # machine-readable CSV contracts
@@ -80,9 +98,10 @@ CloudPilot AI/
 └── README.md
 ```
 
-The guide's suggested `recommendations` and LLM packages are intentionally **not**
-created yet. Empty scaffolding suggests functionality that does not exist; each
-is added with its milestone. `services/forecasting.py` was added with Milestone 4.
+The guide's suggested LLM/recommendations scaffolding was intentionally not created
+up front. Each package is added with its milestone: `forecasting.py` with M4,
+`advisor.py` + `llm/` with M5, and `decisions.py`/`resources.py`/`filters.py`/
+`exports.py` with M6.
 
 ## 4. Request flow: CSV import
 
@@ -344,6 +363,42 @@ Guarantees:
 - **Same package on both engines.** The sample data produced an identical
   `evidence_sha256` on SQLite and PostgreSQL 16.
 
+### 6.5 Dashboard, decisions and exports (Milestone 6)
+
+```text
+browser (React SPA, HashRouter)
+   |
+   +-- GET /api/filters ---------> distinct values + window + import freshness
+   +-- GET /api/costs/* ---------> exact decimal summaries (BigInt formatting)
+   +-- GET /api/resources -------> utilization aggregate + owner tags
+   +-- POST /api/analysis/run ---> deterministic findings
+   +-- POST /api/findings/{id}/decision --> append-only row
+   +-- GET /api/decisions -------> audit trail + latest decision join
+   +-- POST /api/reports/generate -> advisor or deterministic fallback
+   +-- GET /api/exports/findings.csv --> sanitized CSV (attachment, nosniff)
+   +-- GET /api/exports/summary.md ---> Markdown report (attachment, nosniff)
+```
+
+Design notes:
+
+- **Serving.** `GET /` returns `frontend/dist/index.html` when the build exists
+  (`CLOUDPILOT_FRONTEND_DIST_DIR` overrides the path); otherwise it returns the API
+  banner JSON. `/api/*` and `/docs` are unaffected. Hashed Vite assets are served
+  from the same origin, so no CORS or SPA rewrite rules are required at runtime.
+- **Exact rendering.** The SPA receives decimal strings and formats them with
+  `BigInt`, never `parseFloat` for displayed money. Floats are confined to chart
+  axis ticks and labels, which are marked approximate.
+- **Append-only decisions.** `POST /api/findings/{id}/decision` inserts a row and
+  returns `201`; it never updates a finding. Listing findings joins the newest
+  decision per finding. The audit page reads `/api/decisions` with context fields
+  copied at read time from the immutable finding.
+- **Read-only resource health.** `/api/resources` re-uses the analysis thresholds
+  only for pre-check badges. It does not create findings, savings or decisions.
+- **Exports.** CSV generation sanitizes formula-leading cells, quotes per RFC 4180
+  via the stdlib `csv` writer and emits one row per finding per currency. The
+  Markdown report is assembled from stored totals, findings, latest decisions, the
+  newest forecast and import lineage, with an explicit synthetic-data notice.
+
 ## 7. Data model
 
 ```mermaid
@@ -357,6 +412,7 @@ erDiagram
   FORECAST_RUNS ||--o{ FORECAST_POINTS : "projects"
   ANALYSIS_RUNS ||--o{ ADVISOR_REPORTS : "explained by"
   FORECAST_RUNS ||--o{ ADVISOR_REPORTS : "explained by"
+  FINDINGS ||--o{ FINDING_DECISIONS : "reviewed by"
 
   IMPORTS {
     int id PK
@@ -523,6 +579,14 @@ erDiagram
     int duration_ms
     datetime created_at
   }
+  FINDING_DECISIONS {
+    int id PK
+    int finding_id FK
+    string decision "approve|reject|needs_owner_review"
+    string actor "self-declared label"
+    string note "nullable"
+    datetime created_at
+  }
 ```
 
 The guide names the import table `billing_imports`. Because utilization files
@@ -550,7 +614,12 @@ with a `kind` column. See ADR-004.
 | ADR-015 | The LLM adapter uses stdlib `urllib` against one OpenAI-compatible endpoint | Zero SDK dependency, any free provider, easy to audit | No provider-specific features; JSON mode must be supported or disabled |
 | ADR-016 | Model output is strictly validated against the package, then discarded on failure | AI can explain but never invent or mutate amounts | Some legitimate prose is rejected by design; deterministic fallback always exists |
 | ADR-017 | Advisor is opt-in and off by default; only a redacted derived package can leave | Local-first default and free-tier friendly | Users must configure a key; live vendor behaviour is not pre-verified |
-| ADR-018 | Advisor reports are immutable snapshots including the exact package hash | A reviewer can reproduce or reject an explanation | No delete/approval/export yet; storage grows with report count |
+| ADR-018 | Advisor reports are immutable snapshots including the exact package hash | A reviewer can reproduce or reject an explanation | No delete endpoint; storage grows with report count |
+| ADR-019 | Human decisions are append-only `finding_decisions` rows | Review history can never be rewritten; findings stay immutable | UI shows the newest decision; full trail lives in `/api/decisions` |
+| ADR-020 | Resource-health flags are pre-checks, not findings | Keeps exploratory inventory separate from money-bearing, evidence-linked findings | Users may see an idle flag without a matching finding (e.g. below the savings floor) |
+| ADR-021 | Exports are generated on the server | One sanitization/formatting path, testable headers, consistent decimals | Browser downloads a file; no client-side CSV generation |
+| ADR-022 | The SPA formats money with `BigInt` from decimal strings | Preserves the exact-money guarantee in the UI | Floats are allowed only for chart geometry and are labelled approximate |
+| ADR-023 | The SPA is served optionally from the API origin | One command and one port for reviewers; Vite still supports hot reload | Requires a build step for the single-origin mode; no SSR |
 
 ## 9. Deployment
 
@@ -560,10 +629,14 @@ flowchart LR
     API[FastAPI container :8000] --> PG[(PostgreSQL 16 :5432)]
   end
   DEV[Local dev: uvicorn] --> SQLITE[(cloudpilot.db)]
-  WEB[React/Vite :5173 - M6] -.-> API
+  WEB[React/Vite :5173 - dev] -.-> API
+  BUILT[frontend/dist] --> API
 ```
 
 - Local dev: `uvicorn app.main:app --reload` against SQLite.
+- Dashboard dev: `npm run dev` on `:5173`, with `/api` proxied to `:8000`.
+- Dashboard single origin: `npm run build`, then restart the API; `/` serves
+  `frontend/dist/index.html`, and hashed assets are served from the same origin.
 - Compose: `docker compose up --build` runs migrations then serves the API.
 - Production expectations (later): non-root container, `CLOUDPILOT_AUTO_CREATE_TABLES=false`,
   secrets from environment, reverse proxy with TLS, authentication in front of

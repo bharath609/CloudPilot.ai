@@ -3,8 +3,8 @@
 > Status key: `DONE` · `IN PROGRESS` · `PLANNED` · `BLOCKED`
 >
 > This plan follows the milestone order in `CloudPilot_AI_Full_Guide.md` §14.
-> Milestones 1–5 are implemented. Later milestones are deliberately not started
-> until the previous one is reviewed and approved.
+> Milestones 1–6 are implemented. Milestone 7 is deliberately not started until
+> the previous one is reviewed and approved.
 
 ## 1. Guiding constraints
 
@@ -308,14 +308,50 @@ Decisions and limitations:
   quotas and provider-specific JSON-mode behaviour must be verified by the user
   with their own key.
 
-### Milestone 6 — Frontend — `PLANNED`
+### Milestone 6 — Dashboard, approvals and exports — `DONE`
 
-- React + TypeScript + Vite, Recharts.
-- Overview, Cost Explorer, Resource Health, Findings, AI Advisor, Forecasts,
-  Imports, Audit.
-- Sample-data badge, freshness indicators, approval history, exports.
+| Task | Status |
+|---|---|
+| React 19 + TypeScript + Vite dashboard with eight routes and `HashRouter` | DONE — `frontend/` |
+| Overview, Cost Explorer, Resource Health, Findings, AI Advisor, Forecasts, Imports, Audit | DONE |
+| Filter discovery, freshness facts and synthetic-data banner from `/api/filters` | DONE |
+| Read-only resource inventory with utilization and owner tags | DONE — `/api/resources` |
+| Append-only approve / reject / needs-owner-review decisions + migration `0005` | DONE — `finding_decisions` |
+| Latest decision joined onto each finding | DONE — `FindingOut.decision` |
+| Server-generated Excel-safe CSV and Markdown report | DONE — `/api/exports/*` |
+| Optional static SPA served by FastAPI (`CLOUDPILOT_FRONTEND_DIST_DIR`) | DONE |
+| Exact money formatting in the browser (BigInt, decimal strings) | DONE — `frontend/src/lib/money.ts` |
+| Backend tests (27 new), frontend tests (19), build and lint | DONE |
 
-**Exit check:** recruiter can import sample files and explore the whole workflow.
+**Exit check:** recruiters can import the sample files and explore the complete
+workflow in the browser.
+Result: 138 backend tests pass; `ruff` clean; 19 frontend tests pass; `npm run
+build` succeeds; migration `0005` cycles cleanly and `alembic check` reports no
+drift. A 23-check live smoke test served the built SPA from FastAPI, exercised
+filters, the exact USD total `1531.305850`, resource health, three findings summing
+to `276.720019`, a recorded decision, `/api/decisions`, the `765.016323` forecast,
+a deterministic advisor report, and both exports. Details in `README.md` §Tests.
+
+Decisions and limitations:
+
+- Approvals are **new rows**, not mutations. `finding_decisions` is append-only;
+  `GET /api/findings` attaches the newest decision, and `/api/decisions` keeps the
+  full trail. Findings and savings estimates never change.
+- Resource-health `idle_candidate`/`rightsize_candidate` flags reuse the analysis
+  thresholds but are explicitly **not findings**; only `/api/analysis/run` creates
+  reviewable candidates with money attached.
+- Exports are generated server-side rather than in the browser so that CSV
+  sanitization and line endings are consistent and testable. Every cell is prefixed
+  when it starts with `=`, `+`, `-`, `@`, tab or carriage return.
+- The dashboard formats money from decimal strings with `BigInt`; floats appear
+  only on chart axes and are labelled approximate. It never adds different
+  currencies together.
+- No authentication exists, so the reviewer label is self-declared and displayed
+  as such in the audit page and exports.
+- The app is client-rendered with no role-based views, notifications or workflow
+  state machine; `needs_owner_review` is a label, not an integration.
+- The built bundle is a single chunk (~759 kB) because Recharts is imported up
+  front. Route-level code splitting is deferred to M7.
 
 ### Milestone 7 — Quality and release — `PLANNED`
 
@@ -348,8 +384,15 @@ Decisions and limitations:
 | POST | `/api/reports/generate` | Evidence-bound AI report or deterministic fallback |
 | GET | `/api/reports` | Paginated report history |
 | GET | `/api/reports/{id}` | Report output + exact stored evidence package |
+| GET | `/api/filters` | Distinct filter values, billing window and freshness |
+| GET | `/api/resources` | Read-only utilization inventory with owner tags |
+| POST | `/api/findings/{id}/decision` | Append an approve/reject/needs-owner-review decision |
+| GET | `/api/decisions` | Decision audit trail across findings |
+| GET | `/api/exports/findings.csv` | Excel-safe findings CSV with latest decisions |
+| GET | `/api/exports/summary.md` | Markdown report with totals, decisions, forecast and lineage |
 
-The remaining endpoints from guide §11 (approvals, exports) arrive in Milestone 6.
+Every guide §11 endpoint through Milestone 6 is now implemented. There are still no
+cloud read or write endpoints, and decisions/imports are append-only.
 
 ## 4. Key risks
 
@@ -358,9 +401,10 @@ The remaining endpoints from guide §11 (approvals, exports) arrive in Milestone
 | Float contamination of money | Exact scaled-BIGINT `Decimal` type; tests | M1 |
 | Silent currency mixing | Per-currency grouping; import flags mixed currency | M1/M2 |
 | Malformed CSV corrupting data | Structural gate + row validation + transaction | M1 |
-| CSV formula / prompt injection | Cells stored as inert text; never executed; AI prompt hardening | M1/M5 |
+| CSV formula / prompt injection | Cells stored as inert text; exports prefix formula-leading cells; AI prompt hardening | M1/M5/M6 |
 | Overclaiming savings | Evidence + assumptions + confidence required on every scenario | M3 |
 | AI invents amounts or follows injected text | Bounded/redacted package, typed output, evidence-ID and numeric validation, deterministic fallback | M5 |
+| Lost or rewritten review history | Append-only `finding_decisions`; findings never mutated | M6 |
 | Scope creep | One milestone per review, explicit exit checks | all |
 | Synthetic data mistaken for live | `data_source` field, UI badge, README banner | M1/M6 |
 

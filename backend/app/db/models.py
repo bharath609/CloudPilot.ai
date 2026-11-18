@@ -23,6 +23,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.enums import (
     ConfidenceLevel,
+    DecisionKind,
     FindingStatus,
     FindingType,
     ForecastGranularity,
@@ -325,6 +326,33 @@ class SavingsScenario(Base):
     proposed_monthly_cost: Mapped[Decimal] = mapped_column(ScaledDecimal(6), nullable=False)
     estimated_monthly_savings: Mapped[Decimal] = mapped_column(ScaledDecimal(6), nullable=False)
     assumptions: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
+    created_at: Mapped[datetime] = mapped_column(UtcDateTime, nullable=False, default=utcnow)
+
+
+class FindingDecision(Base):
+    """Append-only record of a human review decision on one finding.
+
+    Findings themselves stay immutable. Recording a decision creates a new row,
+    so the full review history is auditable and nothing is silently overwritten.
+    There is no authentication yet, so ``actor`` is a self-declared label.
+    """
+
+    __tablename__ = "finding_decisions"
+    __table_args__ = (
+        Index("ix_finding_decisions_finding_id", "finding_id"),
+        Index("ix_finding_decisions_created_at", "created_at"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    finding_id: Mapped[int] = mapped_column(
+        ForeignKey("findings.id", ondelete="CASCADE"), nullable=False
+    )
+    decision: Mapped[DecisionKind] = mapped_column(
+        Enum(DecisionKind, native_enum=False, values_callable=_enum_values, length=24),
+        nullable=False,
+    )
+    actor: Mapped[str] = mapped_column(String(80), nullable=False)
+    note: Mapped[str | None] = mapped_column(String(500))
     created_at: Mapped[datetime] = mapped_column(UtcDateTime, nullable=False, default=utcnow)
 
 

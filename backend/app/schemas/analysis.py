@@ -20,6 +20,7 @@ from app.core.enums import (
     RiskLevel,
     ScenarioMethod,
 )
+from app.schemas.decisions import FindingDecisionOut
 
 
 class AnalysisScopeRequest(BaseModel):
@@ -81,6 +82,7 @@ class FindingOut(BaseModel):
     uses_synthetic_prices: bool
     created_at: datetime
     scenario: SavingsScenarioOut | None = None
+    decision: FindingDecisionOut | None = None
 
 
 class AnalysisRunSummary(BaseModel):
