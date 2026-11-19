@@ -9,9 +9,10 @@ transparent spend forecasts and an optional, evidence-bounded AI explanation. Th
 React dashboard puts the whole workflow — import, explore, review, decide and
 export — in one local browser session.
 
-> **Status: Milestones 1–6 (ingestion, cost analytics, waste detection,
-> forecasting, AI advisor and the dashboard/approval workflow) are complete.**
-> Release hardening lands in Milestone 7 — see [Roadmap](#roadmap).
+> **Status: v1.0.0 — all seven milestones are complete.** Ingestion, cost
+> analytics, waste detection, forecasting, the optional AI advisor, the dashboard
+> and the release hardening (CI, type checks, container build, screenshots and a
+> repeatable smoke test) are in place.
 >
 > **All sample data and demo prices are synthetic.** The application holds no
 > cloud credentials and cannot create, resize, stop or delete any cloud resource.
@@ -55,8 +56,11 @@ will only ever explain numbers that deterministic code already computed.
 | Append-only approve / reject / owner-review decisions and audit history | ✅ Milestone 6 |
 | Server-generated Excel-safe CSV findings export and Markdown report | ✅ Milestone 6 |
 | Data-freshness panel, filter discovery and optional static frontend serving | ✅ Milestone 6 |
-| 138 backend tests + 19 frontend tests | ✅ Milestones 1–6 |
-| CI, screenshots, release hardening | ⏳ Milestone 7 |
+| Multi-stage Docker image serving the built SPA | ✅ Milestone 7 |
+| Ruff, strict mypy and pytest in GitHub Actions; frontend lint, typecheck, tests and build | ✅ Milestone 7 |
+| Headless-browser screenshots, architecture diagram and a repeatable release smoke test | ✅ Milestone 7 |
+| 138 backend tests + 20 frontend tests | ✅ Milestones 1–7 |
+| `v1.0.0` release tag | ✅ Milestone 7 |
 
 ## Architecture
 
@@ -93,8 +97,27 @@ flowchart TD
   style N fill:#e8f5e9,stroke:#2e7d32
 ```
 
-Green nodes are implemented through Milestone 6. Detailed design, decisions and
-trade-offs: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
+Green nodes are implemented through Milestone 7. Detailed design, decisions and
+trade-offs: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md). A standalone diagram
+with the trust boundaries is in [`docs/architecture.svg`](docs/architecture.svg).
+
+## Screenshots
+
+The images below were captured from the `v1.0.0` Docker Compose stack with the
+synthetic sample data loaded, using a headless browser at 1440×1000.
+
+![Overview dashboard with exact spend, findings and forecast](docs/screenshots/overview.png)
+
+![Evidence-backed findings with assumptions and price provenance](docs/screenshots/findings.png)
+
+| Page | Screenshot |
+|---|---|
+| Cost Explorer | [`docs/screenshots/costs.png`](docs/screenshots/costs.png) |
+| Resource Health | [`docs/screenshots/resources.png`](docs/screenshots/resources.png) |
+| AI Advisor (deterministic fallback) | [`docs/screenshots/advisor.png`](docs/screenshots/advisor.png) |
+| Forecasts and held-out evaluation | [`docs/screenshots/forecasts.png`](docs/screenshots/forecasts.png) |
+| Imports and validation history | [`docs/screenshots/imports.png`](docs/screenshots/imports.png) |
+| Audit trail | [`docs/screenshots/audit.png`](docs/screenshots/audit.png) |
 
 ## Quick start
 
@@ -108,8 +131,34 @@ docker compose up --build
 - Interactive docs: <http://127.0.0.1:8000/docs>
 - Health: <http://127.0.0.1:8000/api/health>
 
-Containers bind to `127.0.0.1` only. Migrations run automatically at startup.
-Upload the host-side sample files with the `curl` commands below.
+Containers bind to `127.0.0.1` only. The multi-stage image builds the React app
+and FastAPI serves it from the same origin, so <http://127.0.0.1:8000/> is the
+dashboard. Migrations run automatically at startup.
+
+Seed the synthetic sample from the host once both containers are healthy.
+
+**Windows PowerShell**
+
+```powershell
+.\.venv\Scripts\python.exe scripts\seed_sample_data.py `
+  --database-url "postgresql+psycopg://cloudpilot:cloudpilot_dev@localhost:5432/cloudpilot"
+```
+
+**Linux / macOS**
+
+```bash
+python scripts/seed_sample_data.py \
+  --database-url "postgresql+psycopg://cloudpilot:cloudpilot_dev@localhost:5432/cloudpilot"
+```
+
+Then run the release smoke test from the repository root:
+
+```bash
+python scripts/release_smoke_test.py   # BASE_URL defaults to http://127.0.0.1:8000
+```
+
+Upload the host-side sample files with the `curl` commands below if you prefer
+to exercise the import endpoints instead of seeding.
 
 ### Option B — Local Python (SQLite, no Docker)
 
@@ -235,7 +284,7 @@ curl -s http://127.0.0.1:8000/api/findings
 
 Configuration lives in `.env` (copy `.env.example`). No secrets are required.
 
-## API (Milestones 1–6)
+## API (v1.0.0)
 
 | Method | Endpoint | Purpose |
 |---|---|---|
@@ -627,6 +676,7 @@ retained in raw row data but ignored by analysis.
 cd backend
 ..\.venv\Scripts\python.exe -m pytest -o addopts="" -q
 ..\.venv\Scripts\ruff.exe check .
+..\.venv\Scripts\python.exe -m mypy app
 ```
 
 ```powershell
@@ -637,14 +687,20 @@ npm run lint      # oxlint
 npm run build     # TypeScript project build + Vite bundle
 ```
 
-Actual result on this machine (Python 3.14.7 / Node 24.21.0, 18 Nov 2026):
+GitHub Actions runs the same checks on every push and pull request
+(`.github/workflows/ci.yml`): backend lint, strict mypy and pytest; frontend
+typecheck, lint, tests and build; then a Docker image build to prove the
+multi-stage release path.
+
+Actual result on this machine (Python 3.14.7 / Node 24.21.0, 19 Nov 2026):
 
 ```text
-138 passed, 1 warning in 148.18s
+138 passed, 1 warning in 202.97s (0:03:22)
 All checks passed!
+Success: no issues found in 53 source files
 
  Test Files  4 passed (4)
-      Tests  19 passed (19)
+      Tests  20 passed (20)
 ```
 
 The single backend warning is an upstream Starlette notice that `httpx` should be
@@ -652,7 +708,8 @@ replaced by `httpx2`; it is not from this project. `npm run lint` exits 0 with
 warnings about fast-refresh boundaries in the context provider and a
 `set-state-in-effect` hint in `AppState.tsx`; both are intentional and documented
 in the code. `npm run build` warns that the Recharts chunk exceeds 500 kB; the
-bundle is still well under 1 MB uncompressed.
+bundle is still well under 1 MB uncompressed. `mypy` runs with `strict = true`
+and `ignore_missing_imports = true` (third-party packages without stubs).
 
 Coverage includes exact totals against a hand-read CSV fixture, malformed
 encodings, NUL bytes, oversized uploads, duplicate headers, missing columns, row
@@ -682,6 +739,29 @@ headers, and optional static frontend serving (absent build, present build, cust
 directory). Frontend tests cover exact decimal formatting and BigInt arithmetic,
 the API client's error envelope and multipart upload, the full overview render from
 API fixtures, and the append-only decision form round-trip.
+
+Milestone 7 adds release coverage: strict type checking across the backend,
+version reporting (`/api/health` → `1.0.0`), the exact ratio-to-percent forecast
+label regression (`0.90` must render as `90%`, not `1%`), the multi-stage image,
+and a repo-owned end-to-end smoke test.
+
+The v1.0.0 release smoke test lives at
+[`scripts/release_smoke_test.py`](scripts/release_smoke_test.py). It makes 27
+HTTP-only checks against a seeded instance and writes only a decision row and one
+deliberately invalid import. It verifies the served SPA and JS asset, health and
+version, filters/freshness, the exact USD total `1531.305850`, four
+resource-health rows, three findings whose savings sum to `276.720019`, the
+append-only decision flow, the forecast `765.016323` with its held-out evaluation
+and empirical interval, the deterministic advisor fallback with evidence IDs, the
+unchanged totals after the advisor runs, both exports, and a useful
+`missing_columns` error for an invalid CSV.
+
+On 19 Nov 2026 the script passed all 27 checks against
+`docker compose up -d --build --wait` (PostgreSQL 16, project `cloudpilot-ai`),
+after seeding 480 billing rows, 2,880 utilization rows and 4 synthetic prices.
+The composed image reported `v1.0.0` and served
+`/assets/index-Bb8EdqQx.js` from the API origin. The stack was removed afterwards
+with `docker compose down -v`.
 
 The M6 live smoke test (`23` assertions) ran against a seeded temporary SQLite
 database with the built frontend served from the API origin on `127.0.0.1:8123`.
@@ -758,6 +838,21 @@ JSON objects and timestamps were `timestamp with time zone`. The stack and volum
 were then removed with `docker compose down -v`.
 
 ## 5-minute demo
+
+### Fastest path (Docker Compose)
+
+```powershell
+docker compose up -d --build --wait
+.\.venv\Scripts\python.exe scripts\seed_sample_data.py `
+  --database-url "postgresql+psycopg://cloudpilot:cloudpilot_dev@localhost:5432/cloudpilot"
+.\.venv\Scripts\python.exe scripts\release_smoke_test.py
+# open http://127.0.0.1:8000/
+```
+
+On Linux/macOS use `python` in place of `.\.venv\Scripts\python.exe`, or the same
+commands without the backtick continuations. The image already contains the built
+dashboard, so no Node build is required. Tear down with `docker compose down -v`
+when finished. The next section is the longer browser walkthrough.
 
 ### Browser workflow (the recruiter path)
 
@@ -885,7 +980,7 @@ CloudPilot AI/
 │   │       └── prices.py           # catalogue loader, provenance, exact lookup
 │   ├── alembic/                    # migrations 0001–0005 (decisions)
 │   ├── tests/                      # 138 pytest tests
-│   └── pyproject.toml
+│   └── pyproject.toml              # ruff, strict mypy and pytest configuration
 ├── frontend/
 │   ├── src/
 │   │   ├── App.tsx                 # HashRouter and the eight routes
@@ -906,15 +1001,20 @@ CloudPilot AI/
 │   ├── IMPLEMENTATION_PLAN.md
 │   ├── ARCHITECTURE.md
 │   ├── DATA_DICTIONARY.md
-│   └── THREAT_MODEL.md
+│   ├── THREAT_MODEL.md
+│   ├── architecture.svg            # hand-written trust-boundary diagram
+│   └── screenshots/                # headless-browser captures of v1.0.0
 ├── pricing/
 │   ├── sources.md                  # provenance rules
 │   └── catalogue/demo_prices.csv   # clearly labelled synthetic catalogue
 ├── scripts/
 │   ├── generate_sample_data.py     # deterministic synthetic data
 │   ├── seed_sample_data.py         # load sample + catalogue into the configured DB
-│   └── load_price_catalogue.py     # idempotent catalogue refresh
-├── Dockerfile
+│   ├── load_price_catalogue.py     # idempotent catalogue refresh
+│   └── release_smoke_test.py       # 27-check HTTP release verification
+├── .github/workflows/ci.yml        # backend, frontend and container CI
+├── Dockerfile                      # multi-stage: Node build + Python runtime
+├── .dockerignore
 ├── docker-compose.yml
 ├── .env.example
 └── README.md
@@ -930,7 +1030,7 @@ CloudPilot AI/
 | ✅ **M4** | Transparent forecasting with train/test split and error metrics | Forecast reproducible and evaluated |
 | ✅ **M5** | Evidence-bounded AI advisor on a free OpenAI-compatible API (Groq default; Gemini/OpenRouter/Ollama interchangeable), typed output, injection tests | AI explains without inventing prices or changing totals |
 | ✅ **M6** | React dashboard, filters, sample-data badge, append-only approvals, server exports | Full workflow in the browser |
-| **M7** | CI, release hardening, screenshots, `v1.0.0` | `docker compose up --build` demo passes from scratch |
+| ✅ **M7** | CI, strict type checks, multi-stage image, screenshots, architecture diagram, release smoke test, `v1.0.0` | `docker compose up --build` demo passes from scratch |
 
 Details and open questions: [`docs/IMPLEMENTATION_PLAN.md`](docs/IMPLEMENTATION_PLAN.md).
 
@@ -957,12 +1057,16 @@ Details and open questions: [`docs/IMPLEMENTATION_PLAN.md`](docs/IMPLEMENTATION_
 - The dashboard is static files served from the same local origin. It makes no
   third-party requests, has no analytics or telemetry, and uses a hash router so
   no catch-all server rewrite is required.
-- The API has **no authentication** and binds locally. Do not expose it to a
-  network until M7 hardening lands.
+- The API has **no authentication** and binds to loopback by design. It is a
+  single-user local application: do not expose port 8000 or the PostgreSQL port
+  to a network. Authentication, TLS and multi-user tenancy remain out of scope.
+- CI runs lint, strict type checks, tests, the frontend build and a container
+  build on every push. Dependencies are installed from public registries; there is
+  no SBOM or image-signing step.
 
 Full STRIDE-style analysis: [`docs/THREAT_MODEL.md`](docs/THREAT_MODEL.md).
 
-## Known limitations (Milestones 1–6)
+## Known limitations (v1.0.0)
 
 - Analytics are read-only and computed on demand; there is no materialized cache.
   Fine at local sample sizes, but large exports will need pre-aggregation.
@@ -1048,8 +1152,37 @@ Full STRIDE-style analysis: [`docs/THREAT_MODEL.md`](docs/THREAT_MODEL.md).
   for a local demo but would benefit from route-level code splitting.
 - SQLite is fine for one local user; PostgreSQL is recommended for concurrency.
 - The container image runs on Python 3.12 while local development used 3.14.7;
-  both pass the same HTTP checks, but the test suite is executed on the host.
-- No CI pipeline yet; tests and lint are run manually.
+  both pass the same checks, but the test suite is executed on the host.
+- CI does not run a browser end-to-end test. The release screenshots and the
+  HTTP-level `scripts/release_smoke_test.py` are run manually against the
+  composed stack; a browser driver in CI would add significant runtime and
+  runtime-specific flakiness.
+- The release smoke test assumes a fresh seeded database. Re-running it on a
+  database that already contains decisions or reports will fail the audit-count
+  and report-count assertions; reset with `docker compose down -v` first.
+- Version `1.0.0` is a portfolio release, not a supported production product.
+  There is no upgrade/migration support beyond Alembic's schema chain, no
+  compatibility policy and no long-term support commitment.
+
+## Release notes — v1.0.0
+
+- First portfolio release. Seven milestones: ingestion, exact cost analytics,
+  waste detection, forecasting, optional evidence-bounded advisor, dashboard and
+  release hardening.
+- Added strict mypy configuration (`strict = true`) and fixed all findings; added
+  `mypy` to the backend dev extras.
+- Added GitHub Actions CI for backend lint/types/tests, frontend
+  typecheck/lint/tests/build, and a Docker image build.
+- The Docker image is now multi-stage: Node builds `frontend/dist`, the Python
+  runtime serves the SPA and API from one origin.
+- Added `scripts/release_smoke_test.py` (27 HTTP checks) and proved it against a
+  clean `docker compose up --build` PostgreSQL 16 stack.
+- Added headless-browser screenshots (`docs/screenshots/`) and a standalone
+  architecture diagram (`docs/architecture.svg`).
+- Fixed the forecast interval label: the stored quantile `0.90` now renders as
+  **90%**, not `1%`.
+- Version reporting, backend package metadata and the frontend package are aligned
+  at `1.0.0`.
 
 ## Documentation
 

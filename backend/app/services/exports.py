@@ -95,40 +95,40 @@ def findings_csv(db: Session, run_id: int | None) -> tuple[str, str]:
             "warnings",
         ]
     )
-    for item in findings:
-        scenario = scenarios.get(item.id)
-        decision = decisions.get(item.id)
-        assumptions = item.assumptions or (scenario.assumptions if scenario else [])
+    for finding in findings:
+        scenario = scenarios.get(finding.id)
+        decision = decisions.get(finding.id)
+        assumptions = finding.assumptions or (scenario.assumptions if scenario else [])
         writer.writerow(
             [
-                f"finding-{item.id}",
-                item.run_id,
-                item.finding_type.value,
-                _text(item.resource_id),
-                _text(item.service),
-                _text(item.region),
-                _text(item.environment),
-                _text(item.project),
-                item.currency,
-                _text(item.current_sku),
-                _text(item.recommended_sku),
-                _decimal(item.baseline_monthly_cost),
-                _decimal(item.proposed_monthly_cost),
-                _decimal(item.estimated_monthly_savings),
-                _decimal(item.savings_pct),
-                item.confidence.value,
-                item.risk.value,
-                item.observation_days,
-                item.sample_count,
-                item.cost_window_start.isoformat(),
-                item.cost_window_end.isoformat(),
-                "true" if item.uses_synthetic_prices else "false",
+                f"finding-{finding.id}",
+                finding.run_id,
+                finding.finding_type.value,
+                _text(finding.resource_id),
+                _text(finding.service),
+                _text(finding.region),
+                _text(finding.environment),
+                _text(finding.project),
+                finding.currency,
+                _text(finding.current_sku),
+                _text(finding.recommended_sku),
+                _decimal(finding.baseline_monthly_cost),
+                _decimal(finding.proposed_monthly_cost),
+                _decimal(finding.estimated_monthly_savings),
+                _decimal(finding.savings_pct),
+                finding.confidence.value,
+                finding.risk.value,
+                finding.observation_days,
+                finding.sample_count,
+                finding.cost_window_start.isoformat(),
+                finding.cost_window_end.isoformat(),
+                "true" if finding.uses_synthetic_prices else "false",
                 decision.decision.value if decision else "",
                 _text(decision.actor) if decision else "",
                 _text(decision.note) if decision else "",
                 decision.created_at.isoformat() if decision else "",
                 _text("; ".join(assumptions)),
-                _text("; ".join(item.warnings)),
+                _text("; ".join(finding.warnings)),
             ]
         )
     name = f"cloudpilot-findings-run{run.id}-{_stamp()}.csv" if run else f"cloudpilot-findings-{_stamp()}.csv"
@@ -174,9 +174,9 @@ def summary_markdown(
     if totals.totals:
         lines.append("| Currency | Total | Rows |")
         lines.append("|---|---:|---:|")
-        for item in totals.totals:
+        for total in totals.totals:
             lines.append(
-                f"| {item.currency} | {_decimal(item.amount)} | {item.row_count} |"
+                f"| {total.currency} | {_decimal(total.amount)} | {total.row_count} |"
             )
     else:
         lines.append("_No billing rows._")
@@ -194,54 +194,54 @@ def summary_markdown(
         lines.append("")
         lines.append("| Finding | Resource | Type | Currency | Monthly savings | Risk | Decision |")
         lines.append("|---|---|---|---|---:|---|---|")
-        for item in findings:
-            decision = decisions.get(item.id)
+        for finding in findings:
+            decision = decisions.get(finding.id)
             lines.append(
                 "| {fid} | {resource} | {kind} | {currency} | {saving} | {risk} | {decision} |".format(
-                    fid=f"finding-{item.id}",
-                    resource=_markdown(item.resource_id),
-                    kind=item.finding_type.value,
-                    currency=item.currency,
-                    saving=_decimal(item.estimated_monthly_savings),
-                    risk=item.risk.value,
+                    fid=f"finding-{finding.id}",
+                    resource=_markdown(finding.resource_id),
+                    kind=finding.finding_type.value,
+                    currency=finding.currency,
+                    saving=_decimal(finding.estimated_monthly_savings),
+                    risk=finding.risk.value,
                     decision=decision.decision.value if decision else "pending",
                 )
             )
-        for item in findings:
-            decision = decisions.get(item.id)
+        for finding in findings:
+            decision = decisions.get(finding.id)
             lines.append("")
-            lines.append(f"### finding-{item.id} - {_markdown(item.resource_id)}")
+            lines.append(f"### finding-{finding.id} - {_markdown(finding.resource_id)}")
             lines.append("")
             lines.append(
-                f"- Type: `{item.finding_type.value}`; service {_markdown(item.service)}; "
-                f"environment {_markdown(item.environment)}; project {_markdown(item.project)}"
+                f"- Type: `{finding.finding_type.value}`; service {_markdown(finding.service)}; "
+                f"environment {_markdown(finding.environment)}; project {_markdown(finding.project)}"
             )
             lines.append(
-                f"- Baseline {_decimal(item.baseline_monthly_cost)} {item.currency}; "
-                f"proposed {_decimal(item.proposed_monthly_cost)}; "
-                f"estimated monthly savings **{_decimal(item.estimated_monthly_savings)}** "
-                f"({_decimal(item.savings_pct)}%)"
+                f"- Baseline {_decimal(finding.baseline_monthly_cost)} {finding.currency}; "
+                f"proposed {_decimal(finding.proposed_monthly_cost)}; "
+                f"estimated monthly savings **{_decimal(finding.estimated_monthly_savings)}** "
+                f"({_decimal(finding.savings_pct)}%)"
             )
             lines.append(
-                f"- Confidence {item.confidence.value}; risk {item.risk.value}; "
-                f"observation {item.observation_days} day(s), {item.sample_count} sample(s)"
+                f"- Confidence {finding.confidence.value}; risk {finding.risk.value}; "
+                f"observation {finding.observation_days} day(s), {finding.sample_count} sample(s)"
             )
-            if item.current_sku or item.recommended_sku:
+            if finding.current_sku or finding.recommended_sku:
                 lines.append(
-                    f"- SKU: {_markdown(item.current_sku or 'unknown')} -> "
-                    f"{_markdown(item.recommended_sku or 'n/a')}"
+                    f"- SKU: {_markdown(finding.current_sku or 'unknown')} -> "
+                    f"{_markdown(finding.recommended_sku or 'n/a')}"
                 )
-            if item.price_source:
+            if finding.price_source:
                 lines.append(
-                    f"- Price source: {_markdown(item.price_source.get('source_name', 'unknown'))}"
-                    f" (synthetic={item.uses_synthetic_prices})"
+                    f"- Price source: {_markdown(finding.price_source.get('source_name', 'unknown'))}"
+                    f" (synthetic={finding.uses_synthetic_prices})"
                 )
-            if item.assumptions:
+            if finding.assumptions:
                 lines.append("- Assumptions:")
-                lines.extend(f"  - {_markdown(text)}" for text in item.assumptions)
-            if item.warnings:
+                lines.extend(f"  - {_markdown(text)}" for text in finding.assumptions)
+            if finding.warnings:
                 lines.append("- Warnings:")
-                lines.extend(f"  - {_markdown(text)}" for text in item.warnings)
+                lines.extend(f"  - {_markdown(text)}" for text in finding.warnings)
             lines.append(
                 "- Latest human decision: "
                 + (
@@ -275,11 +275,12 @@ def summary_markdown(
         lines.append("")
         lines.append("| Currency | Projected total | Lower | Upper | Interval quantile |")
         lines.append("|---|---:|---:|---:|---:|")
-        for item in series:
+        for forecast_series in series:
             lines.append(
-                f"| {item.currency} | {_decimal(item.projected_total)} | "
-                f"{_decimal(item.projected_lower)} | {_decimal(item.projected_upper)} | "
-                f"{_decimal(item.evaluation.interval_quantile)} |"
+                f"| {forecast_series.currency} | {_decimal(forecast_series.projected_total)} | "
+                f"{_decimal(forecast_series.projected_lower)} | "
+                f"{_decimal(forecast_series.projected_upper)} | "
+                f"{_decimal(forecast_series.evaluation.interval_quantile)} |"
             )
         lines.append("")
         lines.append(
@@ -310,11 +311,11 @@ def summary_markdown(
     if imports:
         lines.append("| Import | Kind | File | Status | Rows | Accepted | SHA-256 |")
         lines.append("|---|---|---|---|---:|---:|---|")
-        for item in imports:
+        for imported in imports:
             lines.append(
-                f"| {item.id} | {item.kind.value} | {_markdown(item.filename)} | "
-                f"{item.status.value} | {item.row_count} | {item.accepted_row_count} | "
-                f"`{item.content_sha256[:16]}...` |"
+                f"| {imported.id} | {imported.kind.value} | {_markdown(imported.filename)} | "
+                f"{imported.status.value} | {imported.row_count} | {imported.accepted_row_count} | "
+                f"`{imported.content_sha256[:16]}...` |"
             )
     else:
         lines.append("_No imports._")

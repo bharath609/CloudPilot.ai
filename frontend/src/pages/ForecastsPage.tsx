@@ -20,6 +20,7 @@ import {
   formatDateTime,
   formatMoney,
   formatPercent,
+  formatRatioPercent,
   plotValue,
   titleCase,
 } from "../lib/money";
@@ -168,7 +169,7 @@ export function ForecastsPage() {
             <Stat
               label="Lower bound"
               value={formatMoney(series.projected_lower, series.currency)}
-              hint={`Empirical ${formatPercent(series.evaluation.interval_quantile, 0)} interval`}
+              hint={`Empirical ${formatRatioPercent(series.evaluation.interval_quantile, 0)} interval`}
             />
             <Stat
               label="Upper bound"

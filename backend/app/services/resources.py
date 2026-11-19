@@ -252,23 +252,23 @@ def _cost_info(
         .order_by(CostRecord.resource_id, CostRecord.usage_date.desc(), CostRecord.id.desc())
     ).scalars()
     meta: dict[str, CostRecord] = {}
-    for row in latest:
-        meta.setdefault(row.resource_id, row)
+    for record in latest:
+        meta.setdefault(record.resource_id, record)
 
     info: dict[str, _CostInfo] = {}
     for resource_id, series in totals.items():
         series.sort(key=lambda item: (-item[1], item[0]))
         currency, amount = series[0]
-        row = meta.get(resource_id)
-        tags = row.tags if row is not None else {}
+        latest_record = meta.get(resource_id)
+        tags = latest_record.tags if latest_record is not None else {}
         info[resource_id] = _CostInfo(
             currency=currency,
             amount=amount,
-            provider=row.provider if row else "",
-            service=row.service if row else "",
-            region=row.region if row else "",
-            environment=row.environment if row else "",
-            project=row.project if row else "",
+            provider=latest_record.provider if latest_record else "",
+            service=latest_record.service if latest_record else "",
+            region=latest_record.region if latest_record else "",
+            environment=latest_record.environment if latest_record else "",
+            project=latest_record.project if latest_record else "",
             owner=tags.get("owner") if isinstance(tags, dict) else None,
             team=tags.get("team") if isinstance(tags, dict) else None,
             other_currencies=len(series) - 1,

@@ -7,7 +7,7 @@ import re
 import time
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
-from typing import Any
+from typing import Any, cast
 
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
@@ -203,9 +203,9 @@ class ImportService:
             self.db.flush()
 
             if kind is ImportKind.BILLING:
-                self.db.add_all(self._cost_rows(record.id, drafts))
+                self.db.add_all(self._cost_rows(record.id, cast(list[CostDraft], drafts)))
             else:
-                self.db.add_all(self._metric_rows(record.id, drafts))
+                self.db.add_all(self._metric_rows(record.id, cast(list[MetricDraft], drafts)))
 
             stored_issues, truncated = self._cap_issues(outcome.issues)
             for issue in stored_issues:

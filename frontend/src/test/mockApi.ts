@@ -13,7 +13,7 @@ import type {
 export const healthFixture: Health = {
   status: "ok",
   app: "CloudPilot AI",
-  version: "0.1.0",
+  version: "1.0.0",
   environment: "test",
   database: "ok",
   time: "2026-03-01T12:00:00+00:00",

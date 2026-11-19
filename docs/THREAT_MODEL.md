@@ -1,4 +1,4 @@
-# CloudPilot AI — Threat Model (v5, Milestones 1–6)
+# CloudPilot AI - Threat Model (v1.0.0, Milestones 1-7)
 
 Scope: local-first MVP running on a developer/recruiter machine or a single
 container. No cloud credentials, no cloud write paths, no authentication yet.
@@ -45,7 +45,7 @@ flowchart LR
    against spreadsheet formulas before download.
 6. App → cloud: **no boundary exists in the MVP** — no credentials, no writes.
 
-## 4. Threats and mitigations (Milestones 1–6)
+## 4. Threats and mitigations (v1.0.0)
 
 | # | Threat | Impact | Mitigation (implemented now) | Residual / planned |
 |---|---|---|---|---|
@@ -63,9 +63,9 @@ flowchart LR
 | T12 | Future/absurd dates poison trends | Misleading forecast | Date window `2000-01-01 … tomorrow (UTC)` | — |
 | T13 | Utilization rows reference unknown resources | Spurious findings | Warning `resource_not_in_billing`; detection requires cost evidence (M3) | — |
 | T14 | Instance exposed to LAN/Internet without auth | Data disclosure | Binds `127.0.0.1` by default; Compose publishes only locally; README warns | Add auth before any remote deployment |
-| T15 | Secrets committed to Git | Credential leak | `.env` ignored, `.env.example` only; the AI key is optional, read from env into `SecretStr`, never logged or stored | Secret scanning in CI (M7) |
-| T16 | Import history tampering (no approvals yet) | Audit erosion | Append-only imports, SHA-256, row numbers, raw JSON | Hash-chained audit log (M7) |
-| T17 | Supply-chain compromise of dependencies | Code execution | Pinned ranges, minimal dependency set, lockfile in CI (M7); LLM transport uses stdlib `urllib`, no provider SDK | `pip-audit` in CI |
+| T15 | Secrets committed to Git | Credential leak | `.env` ignored, `.env.example` only; the AI key is optional, read from env into `SecretStr`, never logged or stored | Secret scanning is not automated in CI |
+| T16 | Import history tampering | Audit erosion | Append-only imports, SHA-256, row numbers, raw JSON | No hash-chained audit log; deferred beyond v1.0.0 |
+| T17 | Supply-chain compromise of dependencies | Code execution | Minimal dependency set, committed lockfile, `npm ci` in CI and the image; LLM transport uses stdlib `urllib`, no provider SDK | No `pip-audit`, SBOM or image signing yet |
 | T18 | Hostile LLM output (fabricated prices, injected commands) | Wrong advice, unsafe action | Pydantic schema with `extra="forbid"` and `human_review_required: true`; unknown finding/evidence IDs rejected; numeric tokens must exist in the package; no tool access; deterministic fallback | Conservative patterns may still be evaded by obfuscated prose |
 | T19 | Missing price silently replaced by a guessed or fabricated value | Wrong savings | Rightsizing requires an exact catalogue entry; missing SKU/price produces no finding and is disclosed in `stats.skipped` | Vendor catalogue expansion |
 | T20 | Synthetic demo prices mistaken for vendor quotes | False savings claims | `is_synthetic`, `example.invalid` URLs, per-finding warnings, run-level flag, API notes, README banner, report warning, dashboard banner and badges | — |
@@ -85,8 +85,12 @@ flowchart LR
 | T34 | Cost/usage runaway on a free tier | Account limit hit | One request per report, small default token cap, no automatic retries beyond 2, advisor opt-in | No quota accounting |
 | T35 | Review history rewritten or silently superseded | Audit erosion | `finding_decisions` is append-only; findings and savings are immutable; the API and UI always show the newest decision while `/api/decisions` preserves every row | No hash chaining or signed audit log |
 | T36 | Impersonation in the reviewer label | False accountability | The `actor` field is stored and displayed together with a visible "no authentication" notice in the UI and exports | SSO/RBAC before production |
-| T37 | Static SPA serves a stale or unintended bundle | Confusion or local file exposure | The mount is enabled only when `frontend/dist/index.html` exists; `CLOUDPILOT_FRONTEND_DIST_DIR` is an explicit operator setting; assets are content-hashed; the API and `/docs` are unaffected | Cache headers and CSP in M7 |
-| T38 | Dashboard leaks data through third-party requests | Privacy leak | The SPA has no telemetry, analytics or third-party fonts/scripts; all calls are same-origin `/api`; the Vite dev proxy is local only | CSP/headers in M7 |
+| T37 | Static SPA serves a stale or unintended bundle | Confusion or local file exposure | The mount is enabled only when `frontend/dist/index.html` exists; `CLOUDPILOT_FRONTEND_DIST_DIR` is an explicit operator setting; assets are content-hashed; the API and `/docs` are unaffected | No cache-control or CSP headers yet |
+| T38 | Dashboard leaks data through third-party requests | Privacy leak | The SPA has no telemetry, analytics or third-party fonts/scripts; all calls are same-origin `/api`; the Vite dev proxy is local only | CSP/security headers not yet set |
+| T39 | CI workflow or dependency is compromised | Code execution in the build | Workflows are minimal, read-only `permissions`, and use official setup actions; the Docker job only builds (no push or registry credentials) | Actions are referenced by major tag, not commit SHA; no SBOM/signing |
+| T40 | The reviewed artifact differs from the released image | Unverified claims | The same multi-stage Dockerfile is built in CI and used by `docker compose`; the release smoke test runs against the Compose stack | No image digest is published or signed |
+| T41 | Release smoke test mutates a shared database | Data pollution | The script is documented for a fresh demo database; it writes one decision and one invalid import for audit-path coverage | Operator must not run it against production data |
+| T42 | Version and type drift between components | Confusing release | `/api/health`, backend metadata, frontend package and lockfile are aligned at `1.0.0`; strict mypy and CI run on every push | No automated changelog generation |
 
 ## 5. Explicit non-goals and guarantees
 
@@ -160,5 +164,8 @@ flowchart LR
 | Append-only decisions; immutable findings | | | | | | ✅ | ✅ |
 | Export formula sanitization | | | | | | ✅ | ✅ |
 | Same-origin SPA; no third-party requests | | | | | | ✅ | ✅ |
-| Auth / rate limiting | | | | | | | required |
-| Dependency + secret scanning | | | | | | | required |
+| Auth / rate limiting | | | | | | | not implemented |
+| Dependency + secret scanning | | | | | | | partial: lockfile + `npm ci`; no scanner |
+| Strict type checking in CI | | | | | | | ✅ |
+| Multi-stage image built in CI | | | | | | | ✅ |
+| HTTP release smoke test + screenshots | | | | | | | ✅ |

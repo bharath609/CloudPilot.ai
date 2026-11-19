@@ -6,6 +6,7 @@ import {
   formatDecimal,
   formatMoney,
   formatPercent,
+  formatRatioPercent,
   fromScaled,
   percentChange,
   plotValue,
@@ -50,6 +51,12 @@ describe("exact money helpers", () => {
     expect(formatMoney("1531.305850", "USD")).toBe("1,531.31 USD");
     expect(formatMoney("4.552105", "EUR")).toBe("4.55 EUR");
     expect(formatMoney(null, "USD")).toBe("—");
+  });
+
+  it("formats ratio decimals as percentages without showing 0.9 as 1%", () => {
+    expect(formatRatioPercent("0.90", 0)).toBe("90%");
+    expect(formatRatioPercent("0.995", 1)).toBe("99.5%");
+    expect(formatRatioPercent(null)).toBe("—");
   });
 
   it("computes signed percentage change with exact decimals", () => {

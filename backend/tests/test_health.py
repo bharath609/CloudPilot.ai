@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from fastapi.testclient import TestClient
 
+from app import __version__
+
 
 def test_health_reports_database_ok(client: TestClient) -> None:
     response = client.get("/api/health")
@@ -12,7 +14,7 @@ def test_health_reports_database_ok(client: TestClient) -> None:
     assert body["status"] == "ok"
     assert body["database"] == "ok"
     assert body["environment"] == "test"
-    assert body["version"] == "0.1.0"
+    assert body["version"] == __version__ == "1.0.0"
 
 
 def test_short_health_endpoint(client: TestClient) -> None:

@@ -145,7 +145,7 @@ class OpenAICompatibleClient:
     def _read(self, request: Request) -> bytes:
         maximum = self._settings.llm_max_response_bytes
         with self._opener(request, self._settings.llm_timeout_seconds) as response:
-            raw = response.read(maximum + 1)
+            raw: bytes = response.read(maximum + 1)
         if len(raw) > maximum:
             raise LLMError(
                 "The LLM response exceeded the configured size limit.",
@@ -226,8 +226,9 @@ def _parse_response(
     content = message["content"].strip()
     if not content:
         raise LLMError("The LLM response was empty.", code="invalid_response")
-    usage = body.get("usage") if isinstance(body.get("usage"), dict) else {}
-    returned_model = body.get("model") if isinstance(body.get("model"), str) else model
+    usage: dict[str, Any] = body["usage"] if isinstance(body.get("usage"), dict) else {}
+    model_value = body.get("model")
+    returned_model: str = model_value if isinstance(model_value, str) else model
     return LLMResponse(
         content=content,
         model=returned_model,

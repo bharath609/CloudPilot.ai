@@ -14,13 +14,14 @@ import time
 from dataclasses import dataclass
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
-from typing import Any
+from typing import Any, cast
 
 from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings
+from app.core.enums import RiskLevel
 from app.core.errors import AppError, NotFoundError
 from app.core.time import utcnow
 from app.db.models import AdvisorReport, AnalysisRun, Finding, ForecastRun
@@ -632,9 +633,13 @@ def _parse_json_object(text: str) -> dict[str, Any]:
 
 # -- deterministic fallback ----------------------------------------------
 def _fallback_output(package: dict[str, Any], settings: Settings) -> AdvisorOutputOut:
-    analysis = package.get("analysis") if isinstance(package.get("analysis"), dict) else {}
+    analysis: dict[str, Any] = (
+        package["analysis"] if isinstance(package.get("analysis"), dict) else {}
+    )
     findings = analysis.get("findings", []) if isinstance(analysis, dict) else []
-    forecast = package.get("forecast") if isinstance(package.get("forecast"), dict) else {}
+    forecast: dict[str, Any] = (
+        package["forecast"] if isinstance(package.get("forecast"), dict) else {}
+    )
     synthetic = _contains_synthetic(package)
 
     summary = _fallback_summary(analysis, forecast)
@@ -745,7 +750,7 @@ def _fallback_finding(item: dict[str, Any]) -> AdvisorFindingOut:
         explanation=explanation,
         evidence_ids=evidence_ids,
         assumptions=assumptions[:6],
-        risk=str(item.get("risk", "medium")),
+        risk=cast(RiskLevel, str(item.get("risk", "medium"))),
         recommended_next_step=(
             "Ask the resource owner to validate the workload and dependencies, then record "
             "a human decision before any cloud change."
@@ -755,8 +760,12 @@ def _fallback_finding(item: dict[str, Any]) -> AdvisorFindingOut:
 
 # -- helpers --------------------------------------------------------------
 def _contains_synthetic(package: dict[str, Any]) -> bool:
-    analysis = package.get("analysis") if isinstance(package.get("analysis"), dict) else {}
-    forecast = package.get("forecast") if isinstance(package.get("forecast"), dict) else {}
+    analysis: dict[str, Any] = (
+        package["analysis"] if isinstance(package.get("analysis"), dict) else {}
+    )
+    forecast: dict[str, Any] = (
+        package["forecast"] if isinstance(package.get("forecast"), dict) else {}
+    )
     if analysis.get("uses_synthetic_prices"):
         return True
     findings = analysis.get("findings", []) if isinstance(analysis, dict) else []

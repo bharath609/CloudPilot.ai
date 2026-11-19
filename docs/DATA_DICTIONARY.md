@@ -1,6 +1,6 @@
 # CloudPilot AI — Data Dictionary
 
-Version 1.4 — covers Milestones 1–6 (imports, cost records, utilization
+Version 1.5 - covers v1.0.0 (Milestones 1–7: imports, cost records, utilization
 metrics, validation issues, price catalogue, analysis runs, findings, savings
 scenarios, forecasts, advisor reports and review decisions). Money fields are
 `decimal.Decimal` in Python and stored exactly as scaled integers (see §5). All

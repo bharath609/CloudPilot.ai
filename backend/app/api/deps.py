@@ -12,7 +12,8 @@ from app.llm.client import OpenAICompatibleClient, create_client
 
 
 def get_app_settings(request: Request) -> Settings:
-    return request.app.state.settings
+    settings: Settings = request.app.state.settings
+    return settings
 
 
 def get_llm_client(settings: Settings = Depends(get_app_settings)) -> OpenAICompatibleClient | None:

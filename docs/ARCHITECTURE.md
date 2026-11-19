@@ -35,7 +35,8 @@ flowchart TD
 Milestones 1–6 implement the full left-to-right slice: upload → validation →
 normalization → persistence → cost analytics → waste detection and savings
 scenarios → spend forecasting → evidence-bound explanation → dashboard →
-append-only decisions → exports. Milestone 7 is release hardening only.
+append-only decisions → exports. Milestone 7 adds the release gates: strict
+typing, CI, the multi-stage image, screenshots and the HTTP smoke test.
 
 ## 3. Current repository layout
 
@@ -399,6 +400,23 @@ Design notes:
   Markdown report is assembled from stored totals, findings, latest decisions, the
   newest forecast and import lineage, with an explicit synthetic-data notice.
 
+### 6.6 Release and quality path (Milestone 7)
+
+- CI (`.github/workflows/ci.yml`) runs three jobs: backend (`ruff`, strict
+  `mypy`, `pytest`), frontend (`tsc -b`, `oxlint`, `vitest`, `vite build`) and a
+  container build that depends on both.
+- The Dockerfile is multi-stage. `node:22-alpine` installs from the lockfile and
+  builds `frontend/dist`; `python:3.12-slim` installs the backend package, copies
+  the migrations and the built SPA, drops to a non-root user and starts
+  `alembic upgrade head && uvicorn`.
+- `scripts/release_smoke_test.py` exercises the running instance over HTTP only.
+  It is the release evidence for the guide §15 acceptance criteria; it does not
+  import backend modules and therefore cannot pass by mocking the app.
+- Screenshots are captured with headless Chrome from the seeded Compose stack, so
+  they reflect the real build rather than a mock.
+- Version `1.0.0` is exposed by `/api/health`, package metadata and the frontend
+  package; the release tag is annotated.
+
 ## 7. Data model
 
 ```mermaid
@@ -620,6 +638,8 @@ with a `kind` column. See ADR-004.
 | ADR-021 | Exports are generated on the server | One sanitization/formatting path, testable headers, consistent decimals | Browser downloads a file; no client-side CSV generation |
 | ADR-022 | The SPA formats money with `BigInt` from decimal strings | Preserves the exact-money guarantee in the UI | Floats are allowed only for chart geometry and are labelled approximate |
 | ADR-023 | The SPA is served optionally from the API origin | One command and one port for reviewers; Vite still supports hot reload | Requires a build step for the single-origin mode; no SSR |
+| ADR-024 | Strict mypy is a release gate, with `ignore_missing_imports` only | Catches Dynamic SQLAlchemy/typing mistakes without per-module exemptions | Third-party stubs are not enforced |
+| ADR-025 | The release image is multi-stage and CI-built | The artifact reviewers run is the artifact CI verifies | Build time increases; Node is not present at runtime |
 
 ## 9. Deployment
 
@@ -637,10 +657,15 @@ flowchart LR
 - Dashboard dev: `npm run dev` on `:5173`, with `/api` proxied to `:8000`.
 - Dashboard single origin: `npm run build`, then restart the API; `/` serves
   `frontend/dist/index.html`, and hashed assets are served from the same origin.
-- Compose: `docker compose up --build` runs migrations then serves the API.
-- Production expectations (later): non-root container, `CLOUDPILOT_AUTO_CREATE_TABLES=false`,
-  secrets from environment, reverse proxy with TLS, authentication in front of
-  all `/api` routes.
+- Compose: `docker compose up --build` builds the SPA in a Node stage, copies
+  `dist/` into the Python runtime image, runs migrations and serves the API and
+  dashboard from port 8000. Only the API and PostgreSQL ports are published, and
+  both bind to `127.0.0.1`.
+- Release checks: CI gates plus the HTTP-level `scripts/release_smoke_test.py`
+  against a fresh Compose database.
+- Production expectations (later): non-root container (already true), TLS reverse
+  proxy, authentication in front of all `/api` routes, external secret storage,
+  and image signing/SBOM generation.
 
 ## 10. Extensibility
 

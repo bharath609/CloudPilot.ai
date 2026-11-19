@@ -65,6 +65,13 @@ export function formatPercent(value: string | null | undefined, dp = 1): string 
   return `${formatDecimal(value, dp)}%`;
 }
 
+/** Format a ratio decimal string ("0.90") as a percentage ("90%"). */
+export function formatRatioPercent(value: string | null | undefined, dp = 0): string {
+  if (value === null || value === undefined || value === "") return "—";
+  const percent = fromScaled(toScaled(value) * 100n);
+  return formatPercent(percent, dp);
+}
+
 /** Decimal string -> integer scaled by 10^scale, rounded half-up. */
 export function toScaled(value: string, scale = 6): bigint {
   const parts = split(value);

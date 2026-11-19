@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "cloudpilot-ai-backend"
-version = "0.1.0"
+version = "1.0.0"
 description = "Local-first cloud cost analytics and optimization assistant"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -25,10 +25,18 @@ dev = [
   "pytest-cov>=6,<7",
   "httpx>=0.28,<1",
   "ruff>=0.8,<1",
+  "mypy>=1.13,<2",
 ]
 
 [tool.setuptools.packages.find]
 include = ["app*"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+ignore_missing_imports = true
+warn_unused_configs = true
+files = ["app"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

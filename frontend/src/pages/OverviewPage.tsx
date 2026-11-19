@@ -29,6 +29,7 @@ import {
   formatDateTime,
   formatMoney,
   formatPercent,
+  formatRatioPercent,
   percentChange,
   plotValue,
   relativeTime,
@@ -271,7 +272,7 @@ export function OverviewPage() {
               <span className="muted">
                 Likely range {formatMoney(series.projected_lower, series.currency)} –{" "}
                 {formatMoney(series.projected_upper, series.currency)} (
-                {formatPercent(series.evaluation.interval_quantile, 0)} empirical interval)
+                {formatRatioPercent(series.evaluation.interval_quantile, 0)} empirical interval)
               </span>
             </div>
           ) : (

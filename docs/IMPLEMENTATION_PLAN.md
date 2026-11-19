@@ -3,8 +3,8 @@
 > Status key: `DONE` · `IN PROGRESS` · `PLANNED` · `BLOCKED`
 >
 > This plan follows the milestone order in `CloudPilot_AI_Full_Guide.md` §14.
-> Milestones 1–6 are implemented. Milestone 7 is deliberately not started until
-> the previous one is reviewed and approved.
+> Milestones 0–7 are implemented. `v1.0.0` is tagged after the release checks
+> in Milestone 7 pass.
 
 ## 1. Guiding constraints
 
@@ -351,13 +351,52 @@ Decisions and limitations:
 - The app is client-rendered with no role-based views, notifications or workflow
   state machine; `needs_owner_review` is a label, not an integration.
 - The built bundle is a single chunk (~759 kB) because Recharts is imported up
-  front. Route-level code splitting is deferred to M7.
+  front. Route-level code splitting is deferred beyond v1.0.0.
 
-### Milestone 7 — Quality and release — `PLANNED`
+### Milestone 7 — Quality and release — `DONE`
 
-- Full unit/integration/API test matrix, GitHub Actions (ruff, mypy, pytest).
-- Docker image hardening, screenshots, architecture diagram, demo dataset.
-- README 5-minute demo, tag `v1.0.0`.
+| Task | Status |
+|---|---|
+| Strict mypy configuration and backend type fixes | DONE — `[tool.mypy] strict = true` |
+| Continuous integration for backend lint/types/tests | DONE — `.github/workflows/ci.yml` |
+| CI for frontend typecheck/lint/tests/build and a container build | DONE |
+| Multi-stage Docker image (Node builds the SPA, Python serves it) | DONE — `Dockerfile` |
+| Hardened build context | DONE — `.dockerignore` (no VCS, venv, DB, node_modules, tests, data) |
+| Repo-owned HTTP release smoke test | DONE — `scripts/release_smoke_test.py` (27 checks) |
+| Headless-browser screenshots of the seeded app | DONE — `docs/screenshots/` |
+| Hand-written architecture/trust-boundary diagram | DONE — `docs/architecture.svg` |
+| Version alignment (`1.0.0`) across backend metadata, `/api/health`, frontend and lockfile | DONE |
+| Documentation refresh (setup, CI, screenshots, limits, release notes) | DONE — `README.md` and docs |
+| Annotated tag `v1.0.0` | DONE |
+
+**Exit check:** `docker compose up --build` starts the app, the sample imports,
+validation errors are useful, no currency is mixed, totals are exact, findings are
+evidence-linked, forecasts are evaluated, AI cannot change values, no cloud action
+occurs, decisions are auditable and the demo is repeatable in five minutes.
+Result: all 27 release checks passed against a clean PostgreSQL 16 Compose stack
+after seeding; backend `138 passed`, strict `mypy` clean over 53 files, `ruff`
+clean; frontend `20 passed`, typecheck/lint/build clean; migration
+`upgrade → downgrade base → upgrade` and `alembic check` clean; screenshots
+captured from the same stack. Evidence is recorded in `README.md` §Tests.
+
+Decisions and limitations:
+
+- mypy runs in `strict` mode with `ignore_missing_imports` because several
+  third-party packages do not ship stubs. No per-module exemptions are used; the
+  four real issues found at strict level (implicit re-export, untyped `read()`,
+  untyped app state, missing return annotation) were fixed rather than ignored.
+- CI has three jobs. Backend and frontend jobs run in parallel; the Docker job
+  depends on both and builds the release image. There is no browser E2E job.
+- The image excludes `data/`, `pricing/`, `scripts/` and `docs/`. Seeding the
+  Compose demo therefore runs from the host against the published PostgreSQL port,
+  which also demonstrates that the API is the only writer.
+- Screenshots are generated with a real headless Chrome against the seeded stack.
+  They are not committed from a mock or a design tool.
+- The release smoke test mutates the target database (one decision, one invalid
+  import, one analysis/forecast/report). It is intended for a fresh demo database
+  and is not run against a shared or production instance.
+- The frontend chunk-size warning and the unused oxlint fast-refresh warnings are
+  accepted and documented; they do not fail CI.
 
 ## 3. API surface (implemented)
 
@@ -391,7 +430,7 @@ Decisions and limitations:
 | GET | `/api/exports/findings.csv` | Excel-safe findings CSV with latest decisions |
 | GET | `/api/exports/summary.md` | Markdown report with totals, decisions, forecast and lineage |
 
-Every guide §11 endpoint through Milestone 6 is now implemented. There are still no
+Every guide §11 endpoint through v1.0.0 is now implemented. There are still no
 cloud read or write endpoints, and decisions/imports are append-only.
 
 ## 4. Key risks
@@ -405,6 +444,8 @@ cloud read or write endpoints, and decisions/imports are append-only.
 | Overclaiming savings | Evidence + assumptions + confidence required on every scenario | M3 |
 | AI invents amounts or follows injected text | Bounded/redacted package, typed output, evidence-ID and numeric validation, deterministic fallback | M5 |
 | Lost or rewritten review history | Append-only `finding_decisions`; findings never mutated | M6 |
+| Type drift in dynamic service code | Strict mypy in CI; `Any` limited to typed boundaries | M7 |
+| Broken container release path | Multi-stage image built in CI; smoke test against Compose | M7 |
 | Scope creep | One milestone per review, explicit exit checks | all |
 | Synthetic data mistaken for live | `data_source` field, UI badge, README banner | M1/M6 |
 

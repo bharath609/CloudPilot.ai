@@ -13,6 +13,8 @@ from pathlib import Path
 from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from app import __version__
+
 REPO_ROOT = Path(__file__).resolve().parents[3]
 
 
@@ -28,7 +30,7 @@ class Settings(BaseSettings):
     )
 
     app_name: str = "CloudPilot AI"
-    app_version: str = "0.1.0"
+    app_version: str = __version__
     environment: str = "development"
     api_prefix: str = "/api"
     log_level: str = "INFO"

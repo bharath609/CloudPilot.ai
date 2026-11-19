@@ -6,6 +6,8 @@ filter that silently returns nothing.
 
 from __future__ import annotations
 
+from typing import Any
+
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -68,6 +70,6 @@ def filter_options(db: Session) -> FilterOptions:
     )
 
 
-def _distinct(db: Session, column: object) -> list[str]:
-    rows = db.scalars(select(column).distinct().order_by(column))  # type: ignore[arg-type]
+def _distinct(db: Session, column: Any) -> list[str]:
+    rows = db.scalars(select(column).distinct().order_by(column))
     return [value for value in rows if value]
