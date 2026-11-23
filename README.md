@@ -854,6 +854,34 @@ commands without the backtick continuations. The image already contains the buil
 dashboard, so no Node build is required. Tear down with `docker compose down -v`
 when finished. The next section is the longer browser walkthrough.
 
+### Optional: native EUR and INR sample
+
+The default seed loads USD only, so the release checks stay byte-identical. To
+explore a multi-currency ledger, add the synthetic EUR and INR fixtures:
+
+```powershell
+.\.venv\Scripts\python.exe scripts\seed_sample_data.py --multi-currency
+```
+
+This imports `data/sample/billing_multi_currency_sample.csv` (240 rows, EUR and
+INR), `data/sample/utilization_multi_currency_sample.csv` (2,880 hourly samples)
+and `pricing/catalogue/demo_prices_multi_currency.csv` (4 synthetic prices).
+Nothing is converted: each currency keeps its own billing rows, price entries,
+findings and forecast, and the **Display currency** selector in the header
+switches between them. No FX rate exists anywhere in the codebase.
+
+| Currency | 60-day spend | Monthly savings (latest findings) | 30-day forecast |
+| --- | --- | --- | --- |
+| USD | 1,531.305850 | 276.720019 | 765.016323 |
+| EUR | 862.992000 | 323.784000 | 427.968000 |
+| INR | 57,173.220000 | 19,067.280000 | 28,352.880000 |
+
+Click **Run analysis** once (the run now covers every currency) and **Run
+forecast**, then switch the display currency to inspect each ledger separately.
+The import history shows the mixed-currency file as `valid_with_warnings` with
+the `mixed_currency` warning, because currencies must never be summed together.
+For a clean single-currency demo, delete the database and seed without the flag.
+
 ### Browser workflow (the recruiter path)
 
 1. Build the dashboard once (`cd frontend; npm install; npm run build`), start the

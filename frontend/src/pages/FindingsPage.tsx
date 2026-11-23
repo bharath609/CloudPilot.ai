@@ -251,7 +251,10 @@ export function FindingsPage() {
   }, [findings.data]);
 
   const run = async () => {
-    const value = await analysis.run({ currency: currency || undefined });
+    // Analyse every currency at once: findings are stored per currency and the
+    // list below is filtered by the display currency, so switching currencies
+    // never needs a second analysis run.
+    const value = await analysis.run({});
     if (value) findings.refetch();
   };
 
@@ -323,8 +326,8 @@ export function FindingsPage() {
         {analysis.error && <ErrorNote message={analysis.error} />}
         {analysis.result && (
           <p className="success-note">
-            Analysis completed: {analysis.result.findings.length} finding(s) in run #
-            {analysis.result.run.id}. Existing findings are unchanged until the next run.
+            Analysis completed: {analysis.result.findings.length} finding(s) across all currencies
+            in run #{analysis.result.run.id}. Existing findings are unchanged until the next run.
           </p>
         )}
         {findings.data?.run && <Notes items={findings.data.run.notes} />}

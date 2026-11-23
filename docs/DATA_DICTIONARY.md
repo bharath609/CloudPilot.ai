@@ -675,7 +675,10 @@ Codes are stable API surface; renaming requires a version bump.
 | `data/sample/billing_missing_column.csv` | Removes `cost_amount` | `invalid`, 0 rows |
 | `data/sample/utilization_row_errors.csv` | Bad timestamp, >100 %, bad ints | `partial` |
 | `data/sample/billing_multicurrency.csv` | USD + EUR | `valid_with_warnings` + `mixed_currency` |
+| `data/sample/billing_multi_currency_sample.csv` | 60 days × 4 resources in EUR and INR (`--multi-currency`) | `valid_with_warnings` + `mixed_currency` |
+| `data/sample/utilization_multi_currency_sample.csv` | 30 days hourly × the same 4 EUR/INR resources (`--multi-currency`) | `valid` |
 | `pricing/catalogue/demo_prices.csv` | 4 clearly labelled synthetic prices | Loads idempotently; all `is_synthetic=true` |
+| `pricing/catalogue/demo_prices_multi_currency.csv` | 4 synthetic EUR/INR prices (`--multi-currency`) | Loads idempotently; all `is_synthetic=true` |
 
 All values are fabricated. Account IDs use `demo-` prefixes. The demo catalogue
 uses `example.invalid` source URLs and is never a vendor price list.

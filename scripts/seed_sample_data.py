@@ -4,9 +4,12 @@ Run from the repository root:
 
     python scripts/seed_sample_data.py
     python scripts/seed_sample_data.py --force        # re-import even if hashes match
+    python scripts/seed_sample_data.py --multi-currency  # add native EUR and INR fixtures
     python scripts/seed_sample_data.py --database-url postgresql+psycopg://...
 
 This script writes only to the configured database. It performs no cloud calls.
+The multi-currency fixtures keep every amount in its own currency; no FX rate is
+applied anywhere.
 """
 
 from __future__ import annotations
@@ -32,6 +35,11 @@ FILES: list[tuple[ImportKind, str]] = [
     (ImportKind.BILLING, "billing_sample.csv"),
     (ImportKind.UTILIZATION, "utilization_sample.csv"),
 ]
+MULTI_CURRENCY_FILES: list[tuple[ImportKind, str]] = [
+    (ImportKind.BILLING, "billing_multi_currency_sample.csv"),
+    (ImportKind.UTILIZATION, "utilization_multi_currency_sample.csv"),
+]
+MULTI_CURRENCY_CATALOGUE = REPO_ROOT / "pricing" / "catalogue" / "demo_prices_multi_currency.csv"
 
 
 def main() -> int:
@@ -56,6 +64,14 @@ def main() -> int:
         action="store_true",
         help="Skip loading the price catalogue.",
     )
+    parser.add_argument(
+        "--multi-currency",
+        action="store_true",
+        help=(
+            "Also import the synthetic EUR and INR billing, utilization and price fixtures. "
+            "Every amount stays in its own currency; no FX conversion is performed."
+        ),
+    )
     args = parser.parse_args()
 
     settings = Settings(
@@ -69,7 +85,8 @@ def main() -> int:
     session = database.session_factory()
     failures = 0
     try:
-        for kind, filename in FILES:
+        files = [*FILES, *MULTI_CURRENCY_FILES] if args.multi_currency else list(FILES)
+        for kind, filename in files:
             path = SAMPLE_DIR / filename
             if not path.exists():
                 print(f"missing sample file: {path}")
@@ -125,6 +142,18 @@ def main() -> int:
                     f"prices: inserted={result.inserted} updated={result.updated} "
                     f"total={result.total} synthetic={result.synthetic} path={shown}"
                 )
+
+            if args.multi_currency:
+                if not MULTI_CURRENCY_CATALOGUE.exists():
+                    print(f"missing price catalogue: {MULTI_CURRENCY_CATALOGUE}")
+                    failures += 1
+                else:
+                    result = load_price_catalogue(session, MULTI_CURRENCY_CATALOGUE)
+                    shown = MULTI_CURRENCY_CATALOGUE.relative_to(REPO_ROOT)
+                    print(
+                        f"prices (EUR/INR): inserted={result.inserted} updated={result.updated} "
+                        f"total={result.total} synthetic={result.synthetic} path={shown}"
+                    )
     finally:
         session.close()
         database.dispose()
