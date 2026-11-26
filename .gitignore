@@ -39,3 +39,8 @@ reports/
 .vscode/
 .DS_Store
 Thumbs.db
+
+# Desktop build artifacts
+frontend/pyrt/
+frontend/dist-electron/
+*.blockmap

@@ -1,175 +1,87 @@
-import { NavLink, useLocation } from "react-router-dom";
-
-import { exportUrl } from "../api/client";
-import { useAppState } from "../state/AppState";
-import { Badge, Icon } from "./ui";
+import { useEffect, useState } from "react";
+import { NavLink, Outlet } from "react-router-dom";
+import { api } from "../api";
+import { useCurrency } from "../CurrencyContext";
+import { CURRENCIES, type Filters } from "../types";
 
 const NAV = [
-  { to: "/", label: "Overview", icon: "overview", end: true },
-  { to: "/costs", label: "Cost Explorer", icon: "costs" },
-  { to: "/resources", label: "Resource Health", icon: "resources" },
-  { to: "/findings", label: "Findings", icon: "findings" },
-  { to: "/advisor", label: "AI Advisor", icon: "advisor" },
-  { to: "/forecasts", label: "Forecasts", icon: "forecasts" },
-  { to: "/imports", label: "Imports", icon: "imports" },
-  { to: "/audit", label: "Audit", icon: "audit" },
+  { to: "/", label: "Overview", end: true },
+  { to: "/costs", label: "Cost Explorer" },
+  { to: "/resources", label: "Resources" },
+  { to: "/findings", label: "Findings" },
+  { to: "/forecasts", label: "Forecasts" },
+  { to: "/simulation", label: "Simulation Lab" },
+  { to: "/anomalies", label: "Anomalies" },
+  { to: "/imports", label: "Imports" },
+  { to: "/audit", label: "Audit" },
 ];
 
-const TITLES: Record<string, { title: string; subtitle: string }> = {
-  "/": {
-    title: "Overview",
-    subtitle: "Spend, savings and data freshness at a glance.",
-  },
-  "/costs": {
-    title: "Cost Explorer",
-    subtitle: "Filter and chart exact, currency-partitioned spend.",
-  },
-  "/resources": {
-    title: "Resource Health",
-    subtitle: "Utilization, observation basis and ownership. Read-only.",
-  },
-  "/findings": {
-    title: "Optimization Findings",
-    subtitle: "Deterministic candidates for human review. Nothing is applied.",
-  },
-  "/advisor": {
-    title: "AI Advisor",
-    subtitle: "Optional explanation of computed findings. Disabled by default.",
-  },
-  "/forecasts": {
-    title: "Forecasts",
-    subtitle: "Transparent baseline projection with a held-out error estimate.",
-  },
-  "/imports": {
-    title: "Imports",
-    subtitle: "Upload CSV exports and inspect validation lineage.",
-  },
-  "/audit": {
-    title: "Audit",
-    subtitle: "Append-only decisions and advisor report history.",
-  },
-};
+export function Layout() {
+  const { currency, setCurrency } = useCurrency();
+  const [filters, setFilters] = useState<Filters | null>(null);
 
-export function Layout({ children }: { children: React.ReactNode }) {
-  const { filters, filtersError, currency, setCurrency, health, healthError } = useAppState();
-  const location = useLocation();
-  const meta = TITLES[location.pathname] ?? TITLES["/"];
-  const live = health?.status === "ok" && !healthError;
+  useEffect(() => {
+    api.filters().then(setFilters).catch(() => setFilters(null));
+  }, []);
+
+  const fresh = filters?.freshness;
 
   return (
-    <div className="shell">
+    <div className="app">
       <aside className="sidebar">
         <div className="brand">
-          <span className="brand-mark" aria-hidden="true">
-            <svg viewBox="0 0 32 32" width="28" height="28" role="presentation">
-              <path
-                d="M6 19.5 16 5l10 14.5-10 7z"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinejoin="round"
-              />
-              <path d="M16 12v9" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-            </svg>
-          </span>
-          <span className="brand-text">
-            <strong>CloudPilot AI</strong>
-            <small>Local FinOps console</small>
-          </span>
+          <span className="brand-mark">◆</span>
+          <div>
+            <div className="brand-name">CloudPilot AI</div>
+            <div className="brand-tag">Predict. Simulate. Investigate. Act.</div>
+          </div>
         </div>
-
-        <nav className="nav" aria-label="Main navigation">
+        <nav className="nav">
           {NAV.map((item) => (
             <NavLink
               key={item.to}
               to={item.to}
               end={item.end}
-              className={({ isActive }) => `nav-link${isActive ? " active" : ""}`}
+              className={({ isActive }) => (isActive ? "nav-link active" : "nav-link")}
             >
-              <Icon name={item.icon} />
-              <span>{item.label}</span>
+              {item.label}
             </NavLink>
           ))}
         </nav>
-
         <div className="sidebar-foot">
-          {filters?.contains_sample_data ? (
-            <Badge tone="warn">Synthetic sample data</Badge>
-          ) : (
-            <Badge tone="neutral">No sample import detected</Badge>
-          )}
-          <p>
-            CloudPilot never reads from or writes to a cloud account. Uploads are parsed
-            locally and money is stored as exact decimals.
-          </p>
+          <div className="mini-note">Synthetic demo data</div>
+          <div className="mini-note">No FX conversion — native currencies</div>
         </div>
       </aside>
 
       <div className="main">
         <header className="topbar">
-          <div className="page-heading">
-            <h1>{meta.title}</h1>
-            <p>{meta.subtitle}</p>
-          </div>
-
-          <div className="topbar-tools">
-            <span className={`health ${live ? "health-ok" : "health-bad"}`}>
-              <span className="dot" aria-hidden="true" />
-              {live ? "API connected" : filtersError ? "API unreachable" : "Checking API"}
-            </span>
-
-            {filters && filters.currencies.length > 0 && (
-              <label className="currency">
-                <span className="sr-only">Display currency</span>
-                <select
-                  value={currency}
-                  onChange={(event) => setCurrency(event.target.value)}
-                  aria-label="Display currency"
-                >
-                  {filters.currencies.map((code) => (
-                    <option key={code} value={code}>
-                      {code}
-                    </option>
-                  ))}
-                </select>
-              </label>
+          <div className="topbar-title">Cloud Operations Console</div>
+          <div className="topbar-right">
+            {fresh && (
+              <span className={fresh.freshness_warning ? "pill warn" : "pill ok"}>
+                {fresh.freshness_warning ? "Stale data" : "Fresh data"}
+                {fresh.data_age_hours != null ? ` · ${fresh.data_age_hours}h` : ""}
+              </span>
             )}
-
-            <div className="exports">
-              <a className="btn btn-ghost" href={exportUrl("/exports/findings.csv")} download>
-                Export CSV
-              </a>
-              <a className="btn btn-ghost" href={exportUrl("/exports/summary.md")} download>
-                Export report
-              </a>
-            </div>
+            <label className="currency-select">
+              <span>Currency</span>
+              <select
+                value={currency}
+                onChange={(e) => setCurrency(e.target.value as any)}
+              >
+                {CURRENCIES.map((c) => (
+                  <option key={c} value={c}>
+                    {c}
+                  </option>
+                ))}
+              </select>
+            </label>
           </div>
         </header>
-
-        {filters?.contains_sample_data && (
-          <div className="sample-banner" role="note">
-            <strong>Synthetic demo data is loaded.</strong>
-            <span>
-              Every figure below is illustrative sample data, not a vendor quote. Replace it by
-              importing your own billing and utilization CSV files.
-            </span>
-          </div>
-        )}
-
-        <main className="content">{children}</main>
-
-        <footer className="foot">
-          <span>
-            Local-first · no cloud credentials required · findings require human review
-          </span>
-          <span>
-            {filters
-              ? `${filters.import_count} import(s) · last import ${
-                  filters.last_import_filename ?? "—"
-                }`
-              : "Loading data lineage"}
-          </span>
-        </footer>
+        <main className="content">
+          <Outlet />
+        </main>
       </div>
     </div>
   );
