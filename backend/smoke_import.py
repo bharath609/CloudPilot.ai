@@ -145,6 +145,19 @@ check("assistant refuses unknown", answer["intent"] == "unsupported" and answer[
 answer = ask("Is the data stale?")
 check("assistant dataset intent", answer["intent"] == "dataset", answer["intent"])
 
+answer = ask("Show me the findings and their baseline cost.")
+check("assistant plural findings intent", answer["intent"] == "findings", answer["intent"])
+
+answer = ask("Are there any anomalies right now?")
+check("assistant anomalies intent", answer["intent"] == "anomalies", answer["intent"])
+
+answer = ask("Why is my bill high?")
+check("assistant cost driver intent", answer["intent"] == "cost_drivers", answer["intent"])
+check("assistant cost driver names a service", "Amazon EC2" in answer["answer"], answer["answer"][:160])
+
+answer = ask("Which resource should I stop?")
+check("assistant recommends from findings", answer["intent"] == "findings", answer["intent"])
+
 # --- third-party export shapes (header aliases) ----------------------------- #
 alias_csv = """usage_date,provider,service,project,region,environment,cost_amount,currency
 2026-11-10,AWS,Amazon RDS,platform,us-east-1,production,12.00,USD

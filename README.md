@@ -1,5 +1,7 @@
 # CloudPilot AI
 
+<img src="frontend/assets/logo-256.png" alt="CloudPilot AI" width="96" align="right" />
+
 **Predict. Simulate. Investigate. Act.**
 
 CloudPilot AI is a desktop FinOps / cloud-operations console. It ingests billing and
@@ -134,7 +136,7 @@ Requirements on the build machine: Windows x64, Python 3.12+, Node.js 20+.
 | GET | `/api/data/status` | Demo / imported / mixed / empty dataset status |
 | GET | `/api/imports/template?kind=billing` | Download a CSV template |
 | POST | `/api/imports/billing` | Import billing CSV (`mode=replace\|append`) |
-| POST | `/api/imports/resources` | Import resource inventory CSV |
+| POST | `/api/imports/resources` | Import resource inventory CSV (`currency` is the fallback when the file has none) |
 | POST | `/api/data/reset` | Reset to the built-in demo dataset |
 | POST | `/api/assistant/ask` | Ask the grounded local assistant |
 | GET | `/api/audit` | Decision audit trail |
@@ -153,7 +155,7 @@ Interactive docs: `http://127.0.0.1:8000/docs`.
 ```powershell
 cd backend
 python smoke_api.py       # 28 checks across all currencies and layers
-python smoke_import.py    # 34 checks for CSV import, dataset status, reset, assistant
+python smoke_import.py    # 39 checks for CSV import, dataset status, reset, assistant
 python smoke_spa.py       # SPA hosting and fallback routing
 ```
 

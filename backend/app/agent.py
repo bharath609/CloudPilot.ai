@@ -299,6 +299,77 @@ def _answer_trend(conn: sqlite3.Connection, currency: str) -> Dict[str, Any]:
     )
 
 
+def _answer_drivers(conn: sqlite3.Connection, currency: str) -> Dict[str, Any]:
+    """Explain what is driving spend, using only stored rows."""
+    total, row_count, start, end = _total(conn, currency)
+    if row_count == 0:
+        return _result(
+            f"There are no billing rows in {currency}, so there is no cost driver to explain.",
+            "cost_drivers",
+            currency,
+            [],
+            _sources("billing table"),
+            "high",
+        )
+
+    services = _service_totals(conn, currency)
+    top = services[:3]
+    lines = [
+        f"{name}: {_money(amount, currency)} ({float(amount / total * 100):.1f}% of total)"
+        for name, amount in top
+    ]
+    answer = (
+        f"{currency} spend is {_money(total, currency)} across {row_count} rows from {start} to "
+        f"{end}. The largest contributors are " + "; ".join(lines) + "."
+    )
+    facts: List[Dict[str, str]] = [
+        {"label": "Total", "value": _money(total, currency)},
+        {"label": "Largest service", "value": f"{top[0][0]} ({float(top[0][1] / total * 100):.1f}%)"},
+    ]
+
+    daily = _daily_totals(conn, currency)
+    if daily:
+        last = sorted(daily)[-1]
+        recent_start = date.fromordinal(last.toordinal() - 29)
+        prior_end = date.fromordinal(last.toordinal() - 30)
+        prior_start = date.fromordinal(last.toordinal() - 59)
+        recent = sum((a for d, a in daily.items() if recent_start <= d <= last), Decimal("0"))
+        prior = sum((a for d, a in daily.items() if prior_start <= d <= prior_end), Decimal("0"))
+        if prior:
+            change = (recent - prior) / prior * 100
+            answer += (
+                f" The last 30 days are {abs(change):.2f}% "
+                f"{'higher' if change > 0 else 'lower'} than the prior 30 days."
+            )
+            facts.append({"label": "30-day change", "value": f"{change:+.2f}%"})
+
+    finding = conn.execute(
+        "SELECT COUNT(*) AS count, COALESCE(SUM(baseline_monthly_cost), 0) AS baseline "
+        "FROM findings WHERE currency=?",
+        (currency,),
+    ).fetchone()
+    if finding["count"]:
+        answer += (
+            f" {finding['count']} finding(s) carry a combined monthly baseline of "
+            f"{_money(finding['baseline'], currency)}; a baseline is not the same as savings."
+        )
+        facts.append(
+            {"label": "Finding baselines", "value": _money(finding["baseline"], currency)}
+        )
+    else:
+        answer += " No findings are stored for this currency."
+
+    answer += " Only rows in this currency are included; no FX conversion is applied."
+    return _result(
+        answer,
+        "cost_drivers",
+        currency,
+        facts,
+        _sources("billing table", "findings table"),
+        "medium",
+    )
+
+
 def _answer_forecast(conn: sqlite3.Connection, currency: str) -> Dict[str, Any]:
     daily = _daily_totals(conn, currency)
     if len(daily) < 8:
@@ -549,7 +620,7 @@ def answer_question(conn: sqlite3.Connection, question: str, currency: str = "US
     active = _detect_currency(text, currency)
     matches = _find_resources(conn, text)
 
-    if re.search(r"\b(help|what can you do|how do you work|capabilit)", lower):
+    if re.search(r"\b(help|what can you do|how do you work|capabilit(y|ies))\b", lower):
         return _answer_help(active)
     if re.search(r"\b(import|upload|csv|my own data|add data|load data)\b", lower):
         return _answer_import(conn, active)
@@ -557,13 +628,17 @@ def answer_question(conn: sqlite3.Connection, question: str, currency: str = "US
         return _answer_dataset(conn, active)
     if re.search(r"\b(currency|currencies|fx|exchange rate)\b", lower):
         return _answer_currencies(conn, active)
+    if re.search(r"\b(which|what) resources? should i\b|\bwhat should i (stop|delete|rightsize|terminate)\b", lower):
+        return _answer_findings(conn, active)
     if re.search(r"\b(allowed|policy|permission|can i (stop|delete|resize|terminate)|is it safe to)\b", lower):
         return _answer_policy(text, active, matches)
-    if matches and not re.search(r"\b(top|biggest|total|forecast|anomal)\b", lower):
+    if re.search(r"\bwhy\b", lower) and re.search(r"\b(bill|spend|cost|expensive|high|driver)\b", lower):
+        return _answer_drivers(conn, active)
+    if matches and not re.search(r"\b(top|biggest|total|forecast|anomal(y|ies))\b", lower):
         return _answer_resource(conn, text, active, matches)
-    if re.search(r"\b(anomal|unusual|spike|outlier)\b", lower):
+    if re.search(r"\b(anomal(y|ies)|unusual|spike|outlier)\b", lower):
         return _answer_anomalies(conn, active)
-    if re.search(r"\b(finding|savings|waste|idle|rightsiz|opportunit)\b", lower):
+    if re.search(r"\b(findings?|savings|waste|idle|rightsiz(e|ing)|opportunit(y|ies))\b", lower):
         return _answer_findings(conn, active)
     if re.search(r"\b(forecast|projection|predict|next (week|month|14 days))\b", lower):
         return _answer_forecast(conn, active)
