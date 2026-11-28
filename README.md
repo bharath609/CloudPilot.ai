@@ -17,7 +17,7 @@ app needs no separate Python, Node.js, or cloud credentials.
 Get the latest Windows installer from
 [GitHub Releases](https://github.com/bharath609/CloudPilot.ai/releases/latest):
 
-- **`CloudPilot AI Setup 2.1.0.exe`** (~129 MB, Windows 10/11 x64)
+- **`CloudPilot.AI.Setup.2.1.0.exe`** (~129 MB, Windows 10/11 x64)
 - Standard NSIS installer: choose the install location, desktop shortcut included.
 - The app starts its own local backend and stores its database in `%APPDATA%\cloudpilot-ai`.
 
