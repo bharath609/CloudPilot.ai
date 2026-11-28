@@ -22,7 +22,8 @@ CREATE TABLE IF NOT EXISTS imports (
     source TEXT NOT NULL,
     currency TEXT NOT NULL,
     row_count INTEGER NOT NULL,
-    imported_at TEXT NOT NULL
+    imported_at TEXT NOT NULL,
+    dataset TEXT NOT NULL DEFAULT 'billing'
 );
 
 CREATE TABLE IF NOT EXISTS billing (
@@ -56,7 +57,8 @@ CREATE TABLE IF NOT EXISTS resources (
     cost_per_hour TEXT NOT NULL,
     cpu_pct REAL NOT NULL,
     memory_pct REAL NOT NULL,
-    status TEXT NOT NULL
+    status TEXT NOT NULL,
+    sku TEXT NOT NULL DEFAULT ''
 );
 
 CREATE TABLE IF NOT EXISTS findings (
@@ -142,15 +144,15 @@ SERVICES: Dict[str, List[tuple]] = {
 }
 
 RESOURCES = [
-    # resource_id, name, type, provider, env, region, currency, cost_per_hour, cpu, mem, status
-    ("r-ec2-001", "web-prod-01", "ec2", "AWS", "production", "us-east-1", "USD", "0.42", 6.0, 22.0, "idle"),
-    ("r-ec2-002", "api-prod-02", "ec2", "AWS", "production", "us-east-1", "USD", "0.68", 71.0, 63.0, "ok"),
-    ("r-rds-001", "orders-db", "rds", "AWS", "production", "us-east-1", "USD", "0.95", 40.0, 55.0, "under_utilized"),
-    ("r-s3-001", "media-bucket", "s3", "AWS", "production", "us-east-1", "USD", "0.02", 0.0, 0.0, "ok"),
-    ("r-ec2-eu-01", "web-eu-01", "ec2", "AWS", "production", "eu-west-1", "EUR", "0.38", 8.0, 19.0, "idle"),
-    ("r-vm-eu-01", "batch-eu", "vm", "Azure", "production", "westeurope", "EUR", "0.51", 64.0, 70.0, "ok"),
-    ("r-ec2-in-01", "web-in-01", "ec2", "AWS", "production", "ap-south-1", "INR", "12.50", 9.0, 25.0, "idle"),
-    ("r-rds-in-01", "ledger-db", "rds", "AWS", "production", "ap-south-1", "INR", "22.00", 55.0, 60.0, "under_utilized"),
+    # resource_id, name, type, provider, env, region, currency, cost_per_hour, cpu, mem, status, sku
+    ("r-ec2-001", "web-prod-01", "ec2", "AWS", "production", "us-east-1", "USD", "0.42", 6.0, 22.0, "idle", "m5.xlarge"),
+    ("r-ec2-002", "api-prod-02", "ec2", "AWS", "production", "us-east-1", "USD", "0.68", 71.0, 63.0, "ok", "m5.2xlarge"),
+    ("r-rds-001", "orders-db", "rds", "AWS", "production", "us-east-1", "USD", "0.95", 40.0, 55.0, "under_utilized", "db.r5.xlarge"),
+    ("r-s3-001", "media-bucket", "s3", "AWS", "production", "us-east-1", "USD", "0.02", 0.0, 0.0, "ok", "standard"),
+    ("r-ec2-eu-01", "web-eu-01", "ec2", "AWS", "production", "eu-west-1", "EUR", "0.38", 8.0, 19.0, "idle", "m5.large"),
+    ("r-vm-eu-01", "batch-eu", "vm", "Azure", "production", "westeurope", "EUR", "0.51", 64.0, 70.0, "ok", "Standard_D4s_v3"),
+    ("r-ec2-in-01", "web-in-01", "ec2", "AWS", "production", "ap-south-1", "INR", "12.50", 9.0, 25.0, "idle", "m5.large"),
+    ("r-rds-in-01", "ledger-db", "rds", "AWS", "production", "ap-south-1", "INR", "22.00", 55.0, 60.0, "under_utilized", "db.t3.large"),
 ]
 
 FINDINGS = [
@@ -244,8 +246,8 @@ def seed_db(conn: sqlite3.Connection, days: int = 60) -> None:
     conn.executemany(
         """INSERT OR REPLACE INTO resources
         (resource_id, name, resource_type, provider, environment, region, currency,
-         cost_per_hour, cpu_pct, memory_pct, status)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+         cost_per_hour, cpu_pct, memory_pct, status, sku)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
         RESOURCES,
     )
 
@@ -267,11 +269,24 @@ def seed_db(conn: sqlite3.Connection, days: int = 60) -> None:
     conn.commit()
 
 
+def _migrate(conn: sqlite3.Connection) -> None:
+    """Add columns introduced after the first schema without losing data."""
+    import_columns = {row["name"] for row in conn.execute("PRAGMA table_info(imports)")}
+    if "dataset" not in import_columns:
+        conn.execute("ALTER TABLE imports ADD COLUMN dataset TEXT NOT NULL DEFAULT 'billing'")
+
+    resource_columns = {row["name"] for row in conn.execute("PRAGMA table_info(resources)")}
+    if "sku" not in resource_columns:
+        conn.execute("ALTER TABLE resources ADD COLUMN sku TEXT NOT NULL DEFAULT ''")
+    conn.commit()
+
+
 def init_db(seed: bool = True) -> None:
     conn = connect()
     try:
         conn.executescript(SCHEMA)
         conn.commit()
+        _migrate(conn)
         if seed:
             count = conn.execute("SELECT COUNT(*) FROM billing").fetchone()[0]
             if count == 0:

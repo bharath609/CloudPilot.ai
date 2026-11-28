@@ -6,6 +6,7 @@ import { CURRENCIES, type Filters } from "../types";
 
 const NAV = [
   { to: "/", label: "Overview", end: true },
+  { to: "/assistant", label: "AI Assistant" },
   { to: "/costs", label: "Cost Explorer" },
   { to: "/resources", label: "Resources" },
   { to: "/findings", label: "Findings" },
@@ -30,7 +31,7 @@ export function Layout() {
     <div className="app">
       <aside className="sidebar">
         <div className="brand">
-          <span className="brand-mark">◆</span>
+          <img className="brand-logo" src="/logo.svg" alt="CloudPilot AI" width={36} height={36} />
           <div>
             <div className="brand-name">CloudPilot AI</div>
             <div className="brand-tag">Predict. Simulate. Investigate. Act.</div>

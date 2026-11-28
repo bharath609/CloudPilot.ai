@@ -9,12 +9,14 @@ import { SimulationLabPage } from "./pages/SimulationLabPage";
 import { AnomaliesPage } from "./pages/AnomaliesPage";
 import { ImportsPage } from "./pages/ImportsPage";
 import { AuditPage } from "./pages/AuditPage";
+import { AssistantPage } from "./pages/AssistantPage";
 
 export function App() {
   return (
     <Routes>
       <Route element={<Layout />}>
         <Route index element={<OverviewPage />} />
+        <Route path="assistant" element={<AssistantPage />} />
         <Route path="costs" element={<CostExplorerPage />} />
         <Route path="resources" element={<ResourcesPage />} />
         <Route path="findings" element={<FindingsPage />} />

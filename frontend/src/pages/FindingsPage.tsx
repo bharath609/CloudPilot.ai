@@ -55,7 +55,21 @@ export function FindingsPage() {
       <Card title="Findings" subtitle={`Waste and rightsizing opportunities in ${currency}`}>
         {error && <ErrorBox message={error} />}
         {!findings && !error && <Loading what="findings" />}
-        {findings && findings.length === 0 && <div className="empty">No findings for {currency}.</div>}
+        {findings && findings.length === 0 && (
+          <div className="empty-state">
+            <div className="empty-title">No findings for {currency} yet</div>
+            <p>
+              Findings are generated from a resource inventory. Import your own inventory CSV (or
+              billing data) and the app will derive threshold-based findings from your CPU and
+              memory figures.
+            </p>
+            <div className="button-row" style={{ justifyContent: "center" }}>
+              <Link className="btn primary" to="/imports">
+                Import my data →
+              </Link>
+            </div>
+          </div>
+        )}
 
         {findings?.map((f) => {
           const inv = investigations[f.id];

@@ -24,3 +24,9 @@ PORT = int(_env("CLOUDPILOT_PORT", "8000"))
 DATABASE_PATH = Path(_env("CLOUDPILOT_DB", str(ROOT_DIR / "cloudpilot.db")))
 FRONTEND_DIST = Path(_env("CLOUDPILOT_FRONTEND_DIST", str(ROOT_DIR / "frontend" / "dist")))
 DATA_FRESHNESS_HOURS = int(_env("CLOUDPILOT_FRESHNESS_HOURS", "24"))
+
+ALLOWED_CURRENCIES = [
+    code.strip().upper()
+    for code in _env("CLOUDPILOT_ALLOWED_CURRENCIES", "USD,EUR,INR").split(",")
+    if code.strip()
+]

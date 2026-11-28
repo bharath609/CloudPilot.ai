@@ -35,6 +35,9 @@ jobs:
       - name: API smoke tests
         run: python smoke_api.py
 
+      - name: Import and assistant smoke tests
+        run: python smoke_import.py
+
   frontend:
     name: Frontend type check and build
     runs-on: ubuntu-latest

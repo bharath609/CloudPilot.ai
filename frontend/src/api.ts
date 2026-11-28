@@ -1,10 +1,13 @@
 import type {
   AnomalyResult,
+  AssistantAnswer,
   AuditRow,
   Costs,
+  DataStatus,
   Filters,
   Finding,
   Forecast,
+  ImportReport,
   ImportRow,
   Investigation,
   PolicyResult,
@@ -76,4 +79,19 @@ export const api = {
     expected: Record<string, unknown>;
     observed: Record<string, unknown>;
   }) => post<any>("/api/v1/verification/run", payload),
+  dataStatus: () => get<DataStatus>("/api/data/status"),
+  importBilling: (payload: { filename: string; content: string; mode: string }) =>
+    post<ImportReport>("/api/imports/billing", payload),
+  importResources: (payload: {
+    filename: string;
+    content: string;
+    mode: string;
+    currency?: string;
+  }) => post<ImportReport>("/api/imports/resources", payload),
+  resetData: (mode: "demo" | "empty") =>
+    post<{ ok: boolean; mode: string; status: DataStatus }>("/api/data/reset", { mode }),
+  templateUrl: (dataset: "billing" | "resources") =>
+    `${BASE}/api/imports/template?dataset=${dataset}`,
+  ask: (question: string, currency: string) =>
+    post<AssistantAnswer>("/api/assistant/ask", { question, currency }),
 };

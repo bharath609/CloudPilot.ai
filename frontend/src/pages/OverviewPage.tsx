@@ -36,9 +36,42 @@ export function OverviewPage() {
       <Card
         title="Command Center"
         subtitle="Spend, savings and data freshness at a glance"
-        right={<Badge tone="info">{currency} view</Badge>}
+        right={
+          <div className="button-row" style={{ margin: 0 }}>
+            {filters && (
+              <Badge
+                tone={
+                  filters.data_source === "demo"
+                    ? "warn"
+                    : filters.data_source === "empty"
+                    ? "muted"
+                    : "ok"
+                }
+              >
+                {filters.data_source === "demo"
+                  ? "Demo data"
+                  : filters.data_source === "imported"
+                  ? "Your data"
+                  : filters.data_source === "mixed"
+                  ? "Mixed data"
+                  : "No data"}
+              </Badge>
+            )}
+            <Badge tone="info">{currency} view</Badge>
+          </div>
+        }
       >
         {error && <ErrorBox message={error} />}
+        {filters?.data_source === "demo" && (
+          <div className="inline-warn" style={{ display: "flex", gap: 10, alignItems: "center" }}>
+            <span>
+              You are looking at the built-in synthetic demo dataset, not your own billing.
+            </span>
+            <Link className="btn" to="/imports">
+              Import my data →
+            </Link>
+          </div>
+        )}
         {!summary && !error && <Loading what="summary" />}
         {summary && (
           <>
@@ -90,10 +123,11 @@ export function OverviewPage() {
 
       <Card title="Start here" subtitle="Common next steps">
         <div className="quick-links">
+          <Link className="quick-link" to="/assistant">Ask the assistant →</Link>
+          <Link className="quick-link" to="/imports">Import my data →</Link>
           <Link className="quick-link" to="/findings">Review findings →</Link>
           <Link className="quick-link" to="/simulation">Run a what-if →</Link>
           <Link className="quick-link" to="/anomalies">Check anomalies →</Link>
-          <Link className="quick-link" to="/forecasts">View forecasts →</Link>
         </div>
       </Card>
     </div>

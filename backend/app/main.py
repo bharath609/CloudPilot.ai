@@ -12,7 +12,7 @@ from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal, ROUND_HALF_UP
 from typing import Any, Dict, List, Optional
 
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -30,6 +30,15 @@ from .layers.layer3 import (
 from .layers.layer4 import investigate
 from .layers.layer5 import PolicyEngine
 from .layers.layer6 import verify
+from .agent import answer_question
+from .importer import (
+    ImportRejected,
+    data_status,
+    import_billing,
+    import_resources,
+    reset_data,
+    template,
+)
 
 app = FastAPI(title="CloudPilot AI", version="2.0.0")
 app.add_middleware(
@@ -40,6 +49,9 @@ app.add_middleware(
 )
 
 POLICY = PolicyEngine()
+
+# Initialize eagerly so the API works regardless of server lifecycle hooks.
+init_db(seed=True)
 
 
 @app.on_event("startup")
@@ -106,6 +118,15 @@ def filters(conn: sqlite3.Connection = Depends(get_db)) -> Dict[str, Any]:
     ).fetchone()
 
     freshness = assess_freshness(last_import[0] if last_import else None, DATA_FRESHNESS_HOURS)
+    sources = [r[0] for r in conn.execute("SELECT DISTINCT source FROM imports")]
+    if not sources:
+        data_source = "empty"
+    elif sources == ["sample"]:
+        data_source = "demo"
+    elif "sample" in sources:
+        data_source = "mixed"
+    else:
+        data_source = "imported"
     return {
         "currencies": distinct("currency"),
         "providers": distinct("provider"),
@@ -125,7 +146,8 @@ def filters(conn: sqlite3.Connection = Depends(get_db)) -> Dict[str, Any]:
         },
         "last_import_at": last_import[0] if last_import else None,
         "freshness": freshness,
-        "synthetic_data": True,
+        "synthetic_data": data_source == "demo",
+        "data_source": data_source,
         "note": "All amounts are in their original currency; no FX conversion is applied.",
     }
 
@@ -262,6 +284,91 @@ def record_decision(
 @app.get("/api/imports")
 def imports(conn: sqlite3.Connection = Depends(get_db)) -> Dict[str, Any]:
     return {"imports": _rows(conn, "SELECT * FROM imports ORDER BY imported_at DESC")}
+
+
+# --------------------------------------------------------------------------- #
+# API: user data ingestion
+# --------------------------------------------------------------------------- #
+class BillingImportIn(BaseModel):
+    filename: str = "billing.csv"
+    content: str
+    mode: str = "replace"
+
+
+class ResourceImportIn(BaseModel):
+    filename: str = "resources.csv"
+    content: str
+    mode: str = "replace"
+    currency: str = "USD"
+
+
+@app.post("/api/imports/billing")
+def import_billing_csv(
+    payload: BillingImportIn, conn: sqlite3.Connection = Depends(get_db)
+) -> Dict[str, Any]:
+    try:
+        return import_billing(conn, payload.filename, payload.content, payload.mode)
+    except ImportRejected as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@app.post("/api/imports/resources")
+def import_resources_csv(
+    payload: ResourceImportIn, conn: sqlite3.Connection = Depends(get_db)
+) -> Dict[str, Any]:
+    try:
+        return import_resources(
+            conn, payload.filename, payload.content, payload.mode, default_currency=payload.currency
+        )
+    except ImportRejected as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@app.get("/api/imports/template")
+def import_template(dataset: str = "billing") -> Response:
+    if dataset not in ("billing", "resources"):
+        raise HTTPException(status_code=400, detail="dataset must be 'billing' or 'resources'")
+    return Response(
+        content=template(dataset),
+        media_type="text/csv",
+        headers={
+            "Content-Disposition": f'attachment; filename="cloudpilot-{dataset}-template.csv"'
+        },
+    )
+
+
+@app.get("/api/data/status")
+def dataset_status(conn: sqlite3.Connection = Depends(get_db)) -> Dict[str, Any]:
+    return data_status(conn)
+
+
+class ResetIn(BaseModel):
+    mode: str = "demo"
+
+
+@app.post("/api/data/reset")
+def dataset_reset(
+    payload: Optional[ResetIn] = None, conn: sqlite3.Connection = Depends(get_db)
+) -> Dict[str, Any]:
+    try:
+        return reset_data(conn, payload.mode if payload else "demo")
+    except ImportRejected as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+# --------------------------------------------------------------------------- #
+# API: grounded assistant
+# --------------------------------------------------------------------------- #
+class AskIn(BaseModel):
+    question: str
+    currency: str = "USD"
+
+
+@app.post("/api/assistant/ask")
+def assistant_ask(
+    payload: AskIn, conn: sqlite3.Connection = Depends(get_db)
+) -> Dict[str, Any]:
+    return answer_question(conn, payload.question, payload.currency)
 
 
 @app.get("/api/audit")
@@ -473,6 +580,14 @@ def index():
     if idx.exists():
         return FileResponse(str(idx))
     return JSONResponse({"message": "CloudPilot AI API", "docs": "/docs", "health": "/api/health"})
+
+
+@app.get("/logo.svg")
+def logo():
+    path = FRONTEND_DIST / "logo.svg"
+    if path.exists():
+        return FileResponse(str(path), media_type="image/svg+xml")
+    raise HTTPException(status_code=404, detail="Logo not found")
 
 
 @app.get("/{full_path:path}")

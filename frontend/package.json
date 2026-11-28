@@ -1,6 +1,6 @@
 {
   "name": "cloudpilot-ai",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "private": true,
   "description": "CloudPilot AI — Predict. Simulate. Investigate. Act.",
   "main": "electron/main.cjs",
@@ -29,6 +29,7 @@
   "build": {
     "appId": "ai.cloudpilot.desktop",
     "productName": "CloudPilot AI",
+    "icon": "assets/icon.ico",
     "directories": {
       "output": "dist-electron"
     },
@@ -40,7 +41,12 @@
       {
         "from": "../backend",
         "to": "backend",
-        "filter": ["**/*", "!**/__pycache__/**", "!**/*.pyc", "!smoke_*.py"]
+        "filter": [
+          "**/*",
+          "!**/__pycache__/**",
+          "!**/*.pyc",
+          "!smoke_*.py"
+        ]
       },
       {
         "from": "dist",
@@ -52,8 +58,10 @@
       }
     ],
     "win": {
-      "target": ["nsis"],
-      "signAndEditExecutable": false
+      "target": [
+        "nsis"
+      ],
+      "icon": "assets/icon.ico"
     },
     "nsis": {
       "oneClick": false,
